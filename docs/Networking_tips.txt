@@ -150,10 +150,3 @@ developing the hardware and attempting to add code to existing games and even ne
 If you'd like to add information you feel is relevant and important to the process that should be known
 feel free to reach out on discord!
 
-
-
-
-
-
-
-
