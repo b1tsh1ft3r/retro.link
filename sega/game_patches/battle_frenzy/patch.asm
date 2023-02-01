@@ -43,7 +43,6 @@ UART_FCR            EQU $A130C5      ; FIFO control register
 UART_LCR            EQU $A130C7      ; Line control register
 UART_MCR            EQU $A130C9      ; Modem control register
 UART_LSR            EQU $A130CB      ; Line status register
-UART_SPR            EQU $A130CF      ; Scratchpad register
 UART_DLL            EQU $A130C1      ;
 UART_DLM            EQU $A130C3      ;
 UART_DVID           EQU $A130C3      ; DEVICE ID
