@@ -1,37 +1,25 @@
 # Retro.Link
 
+Retro.Link is an Ethernet cartridge adapter for the Sega Genesis video game console. It facilitates the use of networking functions in homebrew and existing games, but only if the software has been programmed to interact with the hardware.
 
-Retro.Link is a pass through style ethernet cartridge adapter for the Sega Genesis 
-that allows homebrew and existing games to have the ability to use networking functions
-for multiplayer or other general uses. This assumes the software has code to interact
-with the hardware.
+# Hardware Details
+The adapter is built using an XR16C850 UART chip and a Lantronix XPICO module. These components provide the adapter with 128-byte hardware send and receive buffers, allowing for efficient data transmission at 921600 baud.
 
-# The Hardware
-The hardware is built on an XR16C850 UART chip and Lantronix XPICO module. The UART has 128 
-byte hardware send and receive buffers. The XR16C850 operates at 921600 Buad 8-N-1. This is 
-the fastest serial speed we can communicate with the XPICO module, however the XR16C850 can 
-transmit at faster speeds than the XPICO allows for. 
+# Key Characteristics
+ * The adapter is pre-configured to make TCP connections to any domain or IP address, but is set to listen specifically on port 5364 for incoming connections.
 
-# General overview points
+* The user has the ability to drop, deny, or allow incoming connections by writing a byte to a designated register.
 
-* The board is configured to make TCP connections to any domain or IP with port number,
-  but listens explcitly on port 5364 for receiving an inbound connection.
-  
-* Drop/Deny or Allow inbound connections via writing a byte to a register. 
-  
-* Blocks all inbound TCP connections on boot until changed.
+* By default, all incoming TCP connections are blocked upon boot, but this setting can be changed.
 
-* All resource intensive network functions/operations are offloaded to the cartridge adapter hardware and UART/XPICO.
+* The adapter's hardware offloads resource-intensive network functions, freeing up the console's processing power.
 
-* UART Maps in $A130C1-$A130CF range on the Sega Genesis. 
+* The UART maps in the range of $A130C1-$A130CF on the Sega Genesis.
 
+# Example Programs
+We've provided some example programs written in C for SGDK and 68000 Assembly to assist developers in understanding the adapter's functionality. These examples are intended to serve as a starting point for further programming efforts.
 
-# Example Code
-An Example program written in C for SGDK is provided to show how to use the network
-adapter. Additionaly an example written in 68000 Assembly is provided as well.
-While both are very simple examples, it hopefully gives the foundation/framework
-that other functions can be built on to exchange packets of information or parse data. 
-
-# Contact
+# Support
+For support or additional information, a Discord community dedicated to Retro.Link is available.
 
 ![Discord Banner 2](https://discordapp.com/api/guilds/783087214162346024/widget.png?style=banner2)
