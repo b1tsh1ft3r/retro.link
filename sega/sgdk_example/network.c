@@ -100,49 +100,168 @@ u8 NET_readByte(void)
 //****************************************************************
 // Network Send Message                                         **
 //****************************************************************
-// Sends a string of data
+// Sends a string of ascii 
 void NET_sendMessage(char *str)
 {
   int i=0;
   int length = strlen(str);
   char data[length+1];
   strcpy(data,str);
-  while (i<length) { NET_sendByte(data[i]); i++; }  
+  while (i<length) { NET_sendByte(data[i]); i++; }
 }
 
 //****************************************************************
-// Print Local IP                                               **
+// Enter Monitor Mode                                           **
 //****************************************************************
-void NET_printLocalIP(int x, int y)
+void NET_enterMonitorMode(void)
 {
-    int i;
+    NET_flushBuffers();
+    NET_sendMessage("C0.0.0.0/0\n");
+    while (!NET_RXReady() || NET_readByte() != '>') {}
+}
 
-    NET_flushBuffers();      // Flush hardware fifos and software buffer
+//****************************************************************
+// Exit Monitor Mode                                            **
+//****************************************************************
+void NET_exitMonitorMode(void)
+{
+    NET_sendMessage("QU\n");
+    while (!NET_RXReady() || NET_readByte() != '>') {}
+    NET_flushBuffers();
+}
 
-    NET_sendMessage("C0.0.0.0/0\n"); // Send command to connect locally to get into monitor mode
-    while (!NET_RXReady() || NET_readByte() != '>') {} // Wait forever until we get '>' char to signify we're in monitor mode
+//****************************************************************
+// Allow Connections                                            **
+//****************************************************************
+// Allows inbound TCP connections on port 5364
+void NET_allowConnections(void)
+{
+    UART_MCR = 0x08;
+    while(UART_MCR != 0x08);
+    return;
+}
 
+//****************************************************************
+// Block Connections                                            **
+//****************************************************************
+// Drops any current connection and blocks future inbound connections
+void NET_BlockConnections(void)
+{
+    UART_MCR = 0x00;
+    while(UART_MCR != 0x00);
+    return;
+}
+
+//****************************************************************
+// Reboot Adapter                                               **
+//****************************************************************
+// Reboots Xpico and waits until its back up before returning
+void NET_resetAdapter(void)
+{
+    NET_enterMonitorMode();
+    NET_sendMessage("RS\n");
+    while(1)
+    { 
+        while(!NET_RXReady());
+        u8 byte = NET_readByte();
+        if(byte == 'D') { break; }
+    }
+    return;
+}
+
+//****************************************************************
+// Connect                                                      **
+//****************************************************************
+// Make an outbound TCP connection to supplied DNS/IP
+void NET_connect(int x, int y, char *str)
+{
+    NET_sendByte('C');
+    NET_sendMessage(str);
+    NET_sendByte(0x0A);
+
+    while(!NET_RXReady());
+    u8 byte = NET_readByte();
+    switch(byte)
+    {
+        case 'C': // Connected
+            VDP_drawText("Connected:", x, y); VDP_drawText(str, x+11, y);
+            break;
+        case 'N': // Host Unreachable
+            VDP_drawText("Error: Host unreachable", x, y);
+            NET_flushBuffers();
+            break;
+    }
+
+}
+
+//****************************************************************
+// Print IP                                                     **
+//****************************************************************
+// Prints IP address of cartridge adapter
+void NET_printIP(int x, int y)
+{
+    NET_enterMonitorMode();
     NET_sendMessage("NC\n"); // Send command to get network information
-    waitMs(25);              // Wait for echo of command to show up in fifo (more than enough time)
-    NET_readByte();          // eat the bytes
-    NET_readByte();          // 
+    while(1)
+    {
+        while(!NET_RXReady());
+        u8 byte = NET_readByte();
+        if(byte == 'G') { break; }
+        if ((byte >= '0' && byte <= '9') || byte == '.' || byte == '1')
+        { 
+            sprintf(str, "%c", byte); VDP_drawText(str, x, y); x++;
+        }
+    }
+    NET_exitMonitorMode();
+}
+
+//****************************************************************
+// Print MAC Address                                            **
+//****************************************************************
+// Prints MAC address of cartridge hardware (Xpico)
+void NET_printMAC(int x, int y)
+{
+    NET_enterMonitorMode();
+    NET_sendMessage("GM\n");
+    for(int i=1; i<22;i++)
+    {
+        while(!NET_RXReady());
+        u8 byte = NET_readByte();
+        if(i>4) { sprintf(str, "%c", byte); VDP_drawText(str, x, y); x++; }        
+    }
+    NET_exitMonitorMode();
+}
+
+//****************************************************************
+// Ping IP Address                                              **
+//****************************************************************
+// Only accepts an IP address to ping
+void NET_pingIP(int x, int y, int ping_count, char *ip)
+{
+    int ping_counter = 0;
+    int byte_count = 0;
+    int tmp = x;
+
+    VDP_drawText("Pinging:", x, y); x+=8;
+
+    NET_enterMonitorMode();
+    NET_sendMessage("PI ");
+    NET_sendMessage(ip);
+    NET_sendMessage("\n");
 
     while(1)
     {
-        if (NET_RXReady()) // Get response but cheaply filter out IP address from response
-        {   
-            u8 response = NET_readByte();
-            if(response == 'G') { i=0; break; } // G char in 'GW' ?
-            if(response == 'I') { i=1; }        // I char in 'IP' ?
-            if(i == 1) { char str[1]; sprintf(str, "%c", response); VDP_drawText(str, x, y); x+=1; }
-        }       
+        while(!NET_RXReady());
+        u8 byte = NET_readByte();
+        byte_count++;
+        if(byte_count > 2)
+        {
+            sprintf(str, "%c", byte);
+            VDP_drawText(str, x, y); x++;
+            if(byte == '\n') { x=tmp; y++; ping_counter++; }
+            if(ping_counter >= ping_count+1) { break; }
+        }
     }
-
-    NET_sendMessage("QU\n"); // Quit monitor mode back to normal operation
-    waitMs(25);              // Wait for echo of command to show up in fifo (more than enough time)
-    NET_readByte();          // eat the bytes
-    NET_readByte();          // 
-
-    while (!NET_RXReady() || NET_readByte() != '>') {} // Wait forever for '>' char to signify we're done
+    NET_exitMonitorMode();
 }
 

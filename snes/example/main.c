@@ -15,7 +15,8 @@ int main(void)
 {
 	consoleInit();                        // Initialize SNES 
 	
-    consoleInitText(0, 0, &snesfont);     // Initialize text console with our font
+    consoleInitText(0, 16 * 2, &tilfont, &snesfont);
+    //consoleInitText(0, 0, &snesfont);     // Initialize text console with our font
 	
     setMode(BG_MODE1,0);  
     bgSetDisable(1);  

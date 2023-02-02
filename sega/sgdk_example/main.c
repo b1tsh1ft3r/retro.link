@@ -1,6 +1,9 @@
 #include <genesis.h>
 #include "network.h"
 
+int cursor_x, cursor_y;
+u8 buttons, buttons_prev;
+
 int main()
 {
     SYS_disableInts();                      // Disable interrupts
@@ -9,59 +12,58 @@ int main()
     VDP_setBackgroundColor(0);              // Set background black
     VDP_setTextPlane(BG_B);                 // Use PLANE B for text rendering
     VDP_setTextPalette(0);                  // Use palette 0 for text color
-    SYS_enableInts();                       // Enable interrupts
-
-    int cursor_x = 1;
-    int cursor_y = 1;
+    SYS_enableInts();                       // Enable interrupts (allows our callback routine to print data)
 
     PAL_fadeOutPalette(PAL0,1,FALSE);
-    VDP_setBackgroundColor(2);
+    VDP_setBackgroundColor(51); // Blue background
     PAL_fadeInPalette(PAL0, palette_grey, 16, FALSE);
 
-    VDP_drawText("______________________________________", cursor_x, cursor_y); cursor_y++;
-    VDP_drawText("          Retro.Link Test ROM         ", cursor_x, cursor_y); cursor_y++;
-    VDP_drawText("______________________________________", cursor_x, cursor_y); cursor_y+=2;
+    cursor_x = 0;
+    cursor_y = 1;
 
-    VDP_drawText("Detecting cartridge...", cursor_x, cursor_y); cursor_x+=23; 
-
+    VDP_drawText("Detecting adapter...[  ]", cursor_x, cursor_y); cursor_x+=21; 
     NET_initialize(); // Detect cartridge and set boolean variable
 
     if(cart_present)
     {
         VDP_setTextPalette(2); // Green text
-        VDP_drawText("[OK]", cursor_x, cursor_y); cursor_x=1; cursor_y++;
+        VDP_drawText("Ok", cursor_x, cursor_y); cursor_x=0; cursor_y+=2;
         VDP_setTextPalette(0); // White text
-        VDP_drawText("Network initialized", cursor_x, cursor_y); cursor_x=1; cursor_y++;
-        NET_printLocalIP(cursor_x-2, cursor_y); cursor_y++;
     }
     else
     {
         VDP_setTextPalette(1); // Red text
-        VDP_drawText("[X]", cursor_x, cursor_y); cursor_x=1; cursor_y++;
+        VDP_drawText("XX", cursor_x, cursor_y); cursor_x=0; cursor_y+=2;
         VDP_setTextPalette(0); // White text
-        VDP_drawText("Adapter not detected", cursor_x, cursor_y);
+        VDP_drawText("Adapter not present", cursor_x, cursor_y);
+        while(1) { SYS_doVBlankProcess(); }
     }
 
 //------------------------------------------------------------------
 // MAIN LOOP
 //------------------------------------------------------------------
 
-    cursor_x = 1;
-    cursor_y = 9;
-    u8 buttons, buttons_prev;
+    VDP_drawText("IP Address:", cursor_x, cursor_y); 
+    NET_printIP(cursor_x+12, cursor_y); cursor_y++;
 
-    NET_flushBuffers(); // Flush hardware fifos (send/receive) and software receive buffer
+    VDP_drawText("MAC:", cursor_x, cursor_y); 
+    NET_printMAC(cursor_x+5, cursor_y); cursor_y+=2;
 
-    UART_MCR = 0x08; // Allow inbound TCP connections to device (Listens on port 5364).
-                     // A value of 0x00 will DROP a current connection and deny future connections.
+    waitMs(2000);
 
-    VDP_drawText("Press START to send 'ABC' text",cursor_x, cursor_y); cursor_x=0; cursor_y++;
+    NET_pingIP(cursor_x, cursor_y, 4, "8.8.8.8"); cursor_y+=6;
+
+    waitMs(2000);
+
+    VDP_drawText("Rebooting adapter...", cursor_x ,cursor_y); cursor_y+=2;
+    NET_resetAdapter();
+
+    NET_connect(cursor_x, cursor_y, "irc.efnet.org:6667"); cursor_x=0; cursor_y++;
+
     while(1) // Loop forever and print out any data we receive in the hardware receive fifo
     { 
         buttons = JOY_readJoypad(JOY_1);
-
-        if(buttons & BUTTON_START && buttons_prev == 0x00) { NET_sendMessage("AB"); NET_sendByte('C'); }
-
+        if(buttons & BUTTON_START && buttons_prev == 0x00) { NET_sendMessage("PONG\n"); }
         while(NET_RXReady()) // while data in hardware receive FIFO
         {   
             u8 byte = NET_readByte(); // Retrieve byte from RX hardware Fifo directly
@@ -75,8 +77,8 @@ int main()
                     cursor_x=1;
                     break; 
                 default:   // print
-                    if (cursor_x >= 38) { cursor_x=1; cursor_y++; }
-                    if (cursor_y >= 22) { VDP_clearTextAreaBG(BG_B, 0, 9, 40, 14); cursor_x=1; cursor_y=9; }
+                    if (cursor_x >= 40) { cursor_x=0; cursor_y++; }
+                    if (cursor_y >= 28) { cursor_x=0; cursor_y=0; }
                     sprintf(str, "%c", byte); // Convert
                     VDP_drawText(str, cursor_x, cursor_y); cursor_x++;
                     break;
@@ -89,3 +91,7 @@ int main()
 //------------------------------------------------------------------
     return(0);
 }
+
+
+
+

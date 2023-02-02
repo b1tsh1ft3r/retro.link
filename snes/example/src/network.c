@@ -98,3 +98,17 @@ u8 NET_readByte(void)
 {
     return *(u8 *)UART_RHR;
 }
+
+
+//****************************************************************
+// Network Send Message                                         **
+//****************************************************************
+// Sends a string of ascii 
+void NET_sendMessage(char *str)
+{
+  int i=0;
+  int length = strlen(str);
+  char data[length+1];
+  strcpy(data,str);
+  while (i<length) { NET_sendByte(data[i]); i++; }
+}
