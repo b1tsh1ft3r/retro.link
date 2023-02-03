@@ -44,6 +44,10 @@ Allow_Connections:
     move.b  #$08, UART_MCR   ; Allow inbound connections on port 5364.
     rts
 
+Deny_Connections:
+    move.b  #$00, UART_MCR   ; Drop/Deny connections inbound
+    rts
+
 ; To make a connection to another device via TCP you will need to send a connection
 ; command through the UART to the XPICO by writing an IP address and port "C70.13.153.10:5364\n".
 ; You can also use DNS in place of the IP address as well "Cwebsite.com:80\n". All Retro.link 
@@ -84,5 +88,5 @@ Receive_Byte:
 	rts                      ; Return
 
 Flush_Fifos:
-        move.b  #$07, UART_FCR   ; Flush send/receive fifos
-        rts                      ; Return
+    move.b  #$07, UART_FCR   ; Flush send/receive fifos
+    rts                      ; Return

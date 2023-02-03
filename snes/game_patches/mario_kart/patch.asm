@@ -67,7 +67,7 @@ constant WHOAMI(RAMBASE+0)      // (B) WHOAMI
 // PATCH POINTS
 //***********************************
     origin $0843C               // Joypad routine in Vblank
-    jsl  Rlink_Joypad           // Jump to our routine
+    jsl    Rlink_Joypad         // Jump to our routine
     rts
 
 //*******************************************************************************
