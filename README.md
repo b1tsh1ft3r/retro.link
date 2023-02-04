@@ -26,6 +26,4 @@ We've provided some examples in C and assembly to assist developers in understan
 * Super Nintendo - Example program written in [C](https://github.com/b1tsh1ft3r/retro.link/tree/main/snes/c_example) for [PVSnesLib](https://github.com/alekmaul/pvsneslib) and [65816 Assembly](https://github.com/b1tsh1ft3r/retro.link/tree/main/snes/game_patches).
 
 # Support
-For support or additional information, or if you would like to help, join our Discord server!
-
-![Discord Banner 2](https://discordapp.com/api/guilds/783087214162346024/widget.png?style=banner2)
+For support or additional information, or if you would like to help, join our [Discord](https://discord.gg/T9qUEtMRBA) server!
