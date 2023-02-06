@@ -107,17 +107,17 @@ Store_Joypad:
     eor.b   JOYPAD_FIELD+4,x    // Prev frame
     and.b   JOYPAD_FIELD,x      // Current
     sta.b   JOYPAD_FIELD+8,x    // New inputs
-    ldy.w   $0E32
-    beq     Store_Prev
-    ldy.w   $0E50
-    bne     Store_Prev
-    ldy.w   $0032
-    bne     Store_Prev
-    bit.w   #$9000
-    beq     Store_Prev
+    ldy.w   $0E32               // Demo flag?
+    beq     Continue_Scan
+    ldy.w   $0E50               // Ending flag?
+    bne     Continue_Scan
+    ldy.w   $0032               // Game select?
+    bne     Continue_Scan
+    bit.w   #$9000              // B/Start buttons?
+    beq     Continue_Scan
     pla                         // Pull stashed joypad value from stack into A
-    jml     $8085FD
-Store_Prev:
+    jml     $8085FD             // Start title screen?
+Continue_Scan:
     pla                         // pull new joydata off stack to A
     sta.b   JOYPAD_FIELD+4,x    // update prev frame value with the new data from this frame
     rtl
@@ -126,23 +126,16 @@ Store_Prev:
 //** Networking                                                                **
 //*******************************************************************************
 Networking:
-    bra  No_Data            // temp hack for now
-    
-// It appears since we're querying into open-bus territory that it causes issues
-// since nothing is mapped here physically (yet). For now we comment out the logic
-// or the patch freezes the game on title screen
-
-//  lda.w UART_LSR          // Load UART_LSR to A
-//  bit.b #0                // Data available in UART receive buffer?
-//  beq   No_Data           // if no data, just clear joypad input, exit. 
+    bit     UART_LSR            // Data available in UART receive buffer?
+    bne     No_Data             // Branch if not set
 
 Get_Data:
-    sta   UART_RHR          // Get joypad data from UART into A
-    rtl                     // Return with remote data in A
+    lda     UART_RHR            // Get joypad data from UART into A
+    rtl                         // Return with remote data in A
 
 No_Data:
-    lda.w #$0000            // Null out joypad input value in A to store
-    rtl                     // Return
+    lda.w   #$0000              // Null out joypad input value in A to store
+    rtl                         // Return
 
 //*******************************************************************************
 //** END                                                                       **

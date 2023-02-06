@@ -1,4 +1,5 @@
-#include <genesis.h>
+#include <snes.h>
+#include <string.h>
 #include "network.h"
 
 //****************************************************************
@@ -30,10 +31,11 @@ void NET_initialize()
 //****************************************************************
 void NET_flushBuffers(void)
 {
+    int i;
     readIndex  = 0;         // reset read index for software receive buffer
     writeIndex = 0;         // reset write index for software receive buffer
     UART_FCR   = 0x07;      // Reset UART TX/RX hardware fifos
-    for(int i=0; i<BUFFER_SIZE; i++) { receive_buffer[i] = 0xFF; } // Software buffer
+    for(i=0; i<BUFFER_SIZE; i++) { receive_buffer[i] = 0xFF; } // Software buffer
     return;
 }
 
@@ -77,6 +79,24 @@ u16 NET_bytesAvailable(void)
 }
 
 //****************************************************************
+// Network TX Ready
+//****************************************************************
+// Returns boolean value if transmit fifo is clear to send data
+bool NET_TXReady() 
+{
+    return (UART_LSR & 0x20);
+}
+
+//****************************************************************
+// Network RX Ready
+//****************************************************************
+// Returns boolean value if there is data in hardware receive fifo
+bool NET_RXReady() 
+{
+    return (UART_LSR & 0x01);
+}
+
+//****************************************************************
 // Network Send
 //****************************************************************
 // Sends a single byte
@@ -88,13 +108,12 @@ void NET_sendByte(u8 data)
 }
 
 //****************************************************************
-// Read Buffer
+// Read Byte
 //****************************************************************
 // Returns a single byte from the hardware UART receive buffer directly
 u8 NET_readByte(void)
 {
-    u8 data = UART_RHR;
-    return data;
+    return UART_RHR;
 }
 
 //****************************************************************
@@ -104,9 +123,11 @@ u8 NET_readByte(void)
 void NET_sendMessage(char *str)
 {
   int i=0;
-  int length = strlen(str);
-  char data[length+1];
-  strcpy(data,str);
+  int length=0; 
+  length = strlen(str);
+  char data[128];
+  strncpy(data, str, length);
+  data[length] = '\0';
   while (i<length) { NET_sendByte(data[i]); i++; }
 }
 
@@ -184,14 +205,13 @@ void NET_connect(int x, int y, char *str)
     switch(byte)
     {
         case 'C': // Connected
-            VDP_drawText("Connected:", x, y); VDP_drawText(str, x+11, y);
+            consoleDrawText(x, y, "Connected:"); consoleDrawText(x+11, y, str);
             break;
         case 'N': // Host Unreachable
-            VDP_drawText("Error: Host unreachable", x, y);
+            consoleDrawText(x, y, "Error: Host unreachable");
             NET_flushBuffers();
             break;
     }
-
 }
 
 //****************************************************************
@@ -209,7 +229,7 @@ void NET_printIP(int x, int y)
         if(byte == 'G') { break; }
         if ((byte >= '0' && byte <= '9') || byte == '.' || byte == '1')
         { 
-            sprintf(str, "%c", byte); VDP_drawText(str, x, y); x++;
+            sprintf(str, "%c", byte); consoleDrawText(x, y, str); x++;
         }
     }
     NET_exitMonitorMode();
@@ -221,13 +241,15 @@ void NET_printIP(int x, int y)
 // Prints MAC address of cartridge hardware (Xpico)
 void NET_printMAC(int x, int y)
 {
+    int i;
+
     NET_enterMonitorMode();
     NET_sendMessage("GM\n");
-    for(int i=1; i<22;i++)
+    for(i=1; i<22; i++)
     {
         while(!NET_RXReady());
         u8 byte = NET_readByte();
-        if(i>4) { sprintf(str, "%c", byte); VDP_drawText(str, x, y); x++; }        
+        if(i>4) { sprintf(str, "%c", byte); consoleDrawText(x, y, str); x++; }        
     }
     NET_exitMonitorMode();
 }
@@ -242,7 +264,7 @@ void NET_pingIP(int x, int y, int ping_count, char *ip)
     int byte_count = 0;
     int tmp = x;
 
-    VDP_drawText("Pinging:", x, y); x+=8;
+    consoleDrawText(x, y, "Pinging:"); x+=8;
 
     NET_enterMonitorMode();
     NET_sendMessage("PI ");
@@ -257,11 +279,10 @@ void NET_pingIP(int x, int y, int ping_count, char *ip)
         if(byte_count > 2)
         {
             sprintf(str, "%c", byte);
-            VDP_drawText(str, x, y); x++;
+            consoleDrawText(x, y, str); x++;
             if(byte == '\n') { x=tmp; y++; ping_counter++; }
             if(ping_counter >= ping_count+1) { break; }
         }
     }
     NET_exitMonitorMode();
 }
-

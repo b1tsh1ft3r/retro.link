@@ -23,13 +23,12 @@ bool cart_present;                  // Flag indicating presense of hardware
 u16  readIndex, writeIndex;         // Receive buffer Read/Write indexes
 char receive_buffer[BUFFER_SIZE];   // Our circular network receive buffer
 
-#define NET_TXReady() (UART_LSR & 0x20) // Returns TRUE if ok to send
-#define NET_RXReady() (UART_LSR & 0x01) // Returns TRUE if a byte is available in the hardware receive buffer
-
 u8   NET_readByte(void);
 u8   NET_readBuffer(void);
 u8   NET_dataAvailable(void);
 u16  NET_bytesAvailable(void);
+bool NET_TXReady();
+bool NET_RXReady();
 void NET_sendByte(u8 data);
 void NET_writeBuffer(u8 data);
 void NET_sendMessage(char *str);

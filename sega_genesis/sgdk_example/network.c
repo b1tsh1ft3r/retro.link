@@ -1,5 +1,4 @@
-#include <snes.h>
-#include <string.h>
+#include <genesis.h>
 #include "network.h"
 
 //****************************************************************
@@ -8,23 +7,22 @@
 // Sets boolean value cart_present to TRUE/FALSE
 void NET_initialize()
 {
-    *(u8 *)UART_LCR = 0x80;                // Setup registers so we can read device ID from UART
-    *(u8 *)UART_DLM = 0x00;                // to detect presence of hardware
-    *(u8 *)UART_DLL = 0x00;                // ..
+    UART_LCR = 0x80;                // Setup registers so we can read device ID from UART
+    UART_DLM = 0x00;                // to detect presence of hardware
+    UART_DLL = 0x00;                // ..
 
-    cart_present = (*(u8 *)UART_DVID == 0x10);
+    cart_present = (UART_DVID == 0x10);
 
-    if(*(u8 *)UART_DVID == 0x10); // Init UART to 921600 Baud 8-N-1 no flow control
+    if (cart_present) // Init UART to 921600 Baud 8-N-1 no flow control
     {
-        *(u8 *)UART_LCR = 0x83;
-        *(u8 *)UART_DLM = 0x00;
-        *(u8 *)UART_DLL = 0x01;
-        *(u8 *)UART_LCR = 0x03;
-        *(u8 *)UART_MCR = 0x00;
-        *(u8 *)UART_FCR = 0x07;
-        *(u8 *)UART_IER = 0x00;
+        UART_LCR = 0x83;
+        UART_DLM = 0x00;
+        UART_DLL = 0x01;
+        UART_LCR = 0x03;
+        UART_MCR = 0x00;
+        UART_FCR = 0x07;
+        UART_IER = 0x00;
     }
-    return;
 }
 
 //****************************************************************
@@ -32,10 +30,11 @@ void NET_initialize()
 //****************************************************************
 void NET_flushBuffers(void)
 {
+    int i;
     readIndex  = 0;         // reset read index for software receive buffer
     writeIndex = 0;         // reset write index for software receive buffer
-    *(u8 *)UART_FCR = 0x07; // Reset UART TX/RX hardware fifos
-    //for(int i=0; i<BUFFER_SIZE; i++) { receive_buffer[i] = 0; } // Software buffer
+    UART_FCR   = 0x07;      // Reset UART TX/RX hardware fifos
+    for(i=0; i<BUFFER_SIZE; i++) { receive_buffer[i] = 0xFF; } // Software buffer
     return;
 }
 
@@ -79,24 +78,41 @@ u16 NET_bytesAvailable(void)
 }
 
 //****************************************************************
+// Network TX Ready
+//****************************************************************
+// Returns boolean value if transmit fifo is clear to send data
+bool NET_TXReady() 
+{
+    return (UART_LSR & 0x20);
+}
+
+//****************************************************************
+// Network RX Ready
+//****************************************************************
+// Returns boolean value if there is data in hardware receive fifo
+bool NET_RXReady() 
+{
+    return (UART_LSR & 0x01);
+}
+
+//****************************************************************
 // Network Send
 //****************************************************************
 // Sends a single byte
 void NET_sendByte(u8 data) 
 {
     while(!NET_TXReady());
-    *(u8 *)UART_RHR = data;
+    UART_RHR = data;
     return;
 }
 
 //****************************************************************
-// Read Buffer
+// Network Read Byte
 //****************************************************************
 // Returns a single byte from the hardware UART receive buffer directly
 u8 NET_readByte(void)
 {
-    u8 data = *(u8 *)UART_RHR;
-    return data;
+    return UART_RHR;
 }
 
 //****************************************************************
@@ -140,8 +156,8 @@ void NET_exitMonitorMode(void)
 // Allows inbound TCP connections on port 5364
 void NET_allowConnections(void)
 {
-    *(u8 *)UART_MCR = 0x08;
-    while(*(u8 *)UART_MCR != 0x08);
+    UART_MCR = 0x08;
+    while(UART_MCR != 0x08);
     return;
 }
 
@@ -151,8 +167,8 @@ void NET_allowConnections(void)
 // Drops any current connection and blocks future inbound connections
 void NET_BlockConnections(void)
 {
-    *(u8 *)UART_MCR = 0x00;
-    while(*(u8 *)UART_MCR != 0x00);
+    UART_MCR = 0x00;
+    while(UART_MCR != 0x00);
     return;
 }
 
@@ -188,10 +204,10 @@ void NET_connect(int x, int y, char *str)
     switch(byte)
     {
         case 'C': // Connected
-            consoleDrawText(x, y, "Connected:"); consoleDrawText(x+11, y, str);
+            VDP_drawText("Connected:", x, y); VDP_drawText(str, x+11, y);
             break;
         case 'N': // Host Unreachable
-            consoleDrawText(x, y, "Error: Host unreachable");
+            VDP_drawText("Error: Host unreachable", x, y);
             NET_flushBuffers();
             break;
     }
@@ -212,7 +228,7 @@ void NET_printIP(int x, int y)
         if(byte == 'G') { break; }
         if ((byte >= '0' && byte <= '9') || byte == '.' || byte == '1')
         { 
-            sprintf(str, "%c", byte); consoleDrawText(x, y, str); x++;
+            sprintf(str, "%c", byte); VDP_drawText(str, x, y); x++;
         }
     }
     NET_exitMonitorMode();
@@ -224,15 +240,13 @@ void NET_printIP(int x, int y)
 // Prints MAC address of cartridge hardware (Xpico)
 void NET_printMAC(int x, int y)
 {
-    int i;
-
     NET_enterMonitorMode();
     NET_sendMessage("GM\n");
-    for(i=1; i<22; i++)
+    for(int i=1; i<22;i++)
     {
         while(!NET_RXReady());
         u8 byte = NET_readByte();
-        if(i>4) { sprintf(str, "%c", byte); consoleDrawText(x, y, str); x++; }        
+        if(i>4) { sprintf(str, "%c", byte); VDP_drawText(str, x, y); x++; }        
     }
     NET_exitMonitorMode();
 }
@@ -247,7 +261,7 @@ void NET_pingIP(int x, int y, int ping_count, char *ip)
     int byte_count = 0;
     int tmp = x;
 
-    consoleDrawText(x, y, "Pinging:"); x+=8;
+    VDP_drawText("Pinging:", x, y); x+=8;
 
     NET_enterMonitorMode();
     NET_sendMessage("PI ");
@@ -262,7 +276,7 @@ void NET_pingIP(int x, int y, int ping_count, char *ip)
         if(byte_count > 2)
         {
             sprintf(str, "%c", byte);
-            consoleDrawText(x, y, str); x++;
+            VDP_drawText(str, x, y); x++;
             if(byte == '\n') { x=tmp; y++; ping_counter++; }
             if(ping_counter >= ping_count+1) { break; }
         }
