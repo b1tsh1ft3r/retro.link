@@ -15,20 +15,19 @@ macro seek(variable offset) {
 }
 
 //*****************************************************************
-//** UART DEFINES                                                **
+//** UART DEFINES (Not-Final)                                    **
 //*****************************************************************
-
-constant UART_RHR($21C1)           // Receive holding register    
-constant UART_THR($21C1)           // Transmit holding register
-constant UART_IER($21C3)           // Interrupt enable register
-constant UART_FCR($21C5)           // Line control register
-constant UART_LCR($21C7)           // Modem control register
-constant UART_MCR($21C9)           // Line status register
-constant UART_LSR($21CB)           // Line status register
-constant UART_DLL($21C1)           // Baud Rate
-constant UART_DLM($21C3)           // Baud Rate
-constant UART_DVID($21C3)          // Device ID
-constant UART_OP2($21C9)           // OP2 GPIO
+constant UART_RHR($21C1)        // Receive holding register    
+constant UART_THR($21C1)        // Transmit holding register
+constant UART_IER($21C3)        // Interrupt enable register
+constant UART_FCR($21C5)        // Line control register
+constant UART_LCR($21C7)        // Modem control register
+constant UART_MCR($21C9)        // Line status register
+constant UART_LSR($21CB)        // Line status register
+constant UART_DLL($21C1)        // Baud Rate
+constant UART_DLM($21C3)        // Baud Rate
+constant UART_DVID($21C3)       // Device ID
+constant UART_OP2($21C9)        // OP2 GPIO
 
 //*******************************************************************************
 // GAME RAM VARIABLES
@@ -66,16 +65,16 @@ constant WHOAMI(RAMBASE+0)      // (B) WHOAMI
 //***********************************
 // PATCH POINTS
 //***********************************
-    origin $0843C               // Joypad routine in Vblank
-    jsl    Rlink_Joypad         // Jump to our routine
+    origin  $0843C              // Joypad routine in Vblank
+    jsl     Rlink_Joypad        // Jump to our routine
     rts
 
 //*******************************************************************************
 //** END OF ROM                                                                **
 //*******************************************************************************
 
-    origin $88000               // LOCATION AT END OF ROM FOR ALL NEW CODE
-    base   $C88000
+    origin  $88000              // LOCATION AT END OF ROM FOR ALL NEW CODE
+    base    $C88000
 
 //*******************************************************************************
 //** RLINK JOYPAD                                                              **
@@ -126,17 +125,39 @@ Continue_Scan:
 //** Networking                                                                **
 //*******************************************************************************
 Networking:
-    bit     UART_LSR            // Data available in UART receive buffer?
-    bne     No_Data             // Branch if not set
-
+    lda     JOYPAD_FIELD,x      // Load local new joypad data to A
+    cmp     #$0000              // Is it empty? (no joypad input)
+    beq     Receive_Data        // Branch and check for remote data instead
+//------------------------------
+Send_Data:
+    lda     UART_LSR            // Get UART status register value in A
+    and     #$05                // mask to check bit 5
+    beq     Send_Data           // Wait until ok to send data
+    lda     JOYPAD_FIELD,x      // Point to our new joypad data in A
+Send_Byte1:
+    sta     UART_THR            // Send byte 1
+    xba                         // swap
+Send_Byte2:
+    sta     UART_THR            // Send byte 2
+    xba                         // swap back
+//------------------------------
+Receive_Data:
+    lda     UART_LSR            // Get UART status register value in A
+    and     #$00                // mask to check bit 0
+    beq     No_Data             // if not set, no data. Just exit
 Get_Data:
-    lda     UART_RHR            // Get joypad data from UART into A
-    rtl                         // Return with remote data in A
-
+    lda     UART_RHR            // Get 1st byte of joypad data into A
+    xba                         // swap
+    lda     UART_RHR            // Get 2nd byte of joypad data into A
+    xba                         // swap
+    rtl                         // Return with remote joypad data (word) in A
+//------------------------------
 No_Data:
-    lda.w   #$0000              // Null out joypad input value in A to store
+    lda.w   #$0000              // Null out joypad input value in A to store for use this frame
     rtl                         // Return
 
 //*******************************************************************************
 //** END                                                                       **
 //*******************************************************************************
+
+
