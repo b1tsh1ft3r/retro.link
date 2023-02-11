@@ -21,9 +21,9 @@ The adapter is built using an XR16C850 UART chip and a Lantronix XPICO module. T
 # Example Programs
 We've provided some examples in C and assembly to assist developers in understanding how to use the adapter. These examples are intended to serve as a starting point for further efforts.
 
-* Sega Genesis - Example program written in [C](https://github.com/b1tsh1ft3r/retro.link/tree/main/sega/sgdk_example) for [SGDK](https://github.com/Stephane-D/SGDK) and [68000 Assembly](https://github.com/b1tsh1ft3r/retro.link/tree/main/sega/asm_example).
+* Sega Genesis - Example program written in [C](https://github.com/b1tsh1ft3r/retro.link/tree/main/sega_genesis/sgdk_example) for [SGDK](https://github.com/Stephane-D/SGDK) and [68000 Assembly](https://github.com/b1tsh1ft3r/retro.link/tree/main/sega_genesis/asm_example).
 
-* Super Nintendo - Example program written in [C](https://github.com/b1tsh1ft3r/retro.link/tree/main/snes/c_example) for [PVSnesLib](https://github.com/alekmaul/pvsneslib) and [65816 Assembly](https://github.com/b1tsh1ft3r/retro.link/tree/main/snes/game_patches).
+* Super Nintendo - Example program written in [C](https://github.com/b1tsh1ft3r/retro.link/tree/main/super_nintendo/c_example) for [PVSnesLib](https://github.com/alekmaul/pvsneslib) and [65816 Assembly](https://github.com/b1tsh1ft3r/retro.link/tree/main/super_nintendo/game_patches).
 
 # Support
 For support or additional information, or if you would like to help, join our [Discord](https://discord.gg/T9qUEtMRBA) server!
