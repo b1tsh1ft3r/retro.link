@@ -27,7 +27,6 @@ constant UART_LSR($21CB)        // Line status register
 constant UART_DLL($21C1)        // Baud Rate
 constant UART_DLM($21C3)        // Baud Rate
 constant UART_DVID($21C3)       // Device ID
-constant UART_OP2($21C9)        // OP2 GPIO
 
 //*******************************************************************************
 // GAME RAM VARIABLES
@@ -125,6 +124,8 @@ Continue_Scan:
 //** Networking                                                                **
 //*******************************************************************************
 Networking:
+    rtl     // temporary for now because this freezes our patch
+
     lda     JOYPAD_FIELD,x      // Load local new joypad data to A
     cmp     #$0000              // Is it empty? (no joypad input)
     beq     Receive_Data        // Branch and check for remote data instead

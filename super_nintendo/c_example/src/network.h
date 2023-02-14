@@ -12,7 +12,6 @@
 #define UART_DLL    *((volatile uint8_t*)(UART_BASE+0))  // Divisor latch LSB. Acessed only when LCR[7] = 1
 #define UART_DLM    *((volatile uint8_t*)(UART_BASE+2))  // Divisor latch MSB. Acessed only when LCR[7] = 1
 #define UART_DVID   *((volatile uint8_t*)(UART_BASE+2))  // Device ID 
-#define UART_OP2    *((volatile uint8_t*)(UART_BASE+8))  // OP2 GPIO (Deny/Allow TCP Connections)
 
 #define BUFFER_SIZE     64          // Size of software receive buffer in bytes.
                                     // UART Send/Receive hardware buffers are 128 Bytes each

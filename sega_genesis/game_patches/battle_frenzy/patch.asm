@@ -46,7 +46,6 @@ UART_LSR            EQU $A130CB      ; Line status register
 UART_DLL            EQU $A130C1      ;
 UART_DLM            EQU $A130C3      ;
 UART_DVID           EQU $A130C3      ; DEVICE ID
-UART_OP2            EQU $A130C9      ; OP2 GPIO
 
 ;-----------------------------------
 ; GAME RAM VARIABLES

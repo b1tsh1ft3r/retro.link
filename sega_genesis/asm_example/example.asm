@@ -12,7 +12,6 @@ UART_LSR    EQU $A130CB      ; Line status register
 UART_DLL    EQU $A130C1      ; Div latch low byte
 UART_DLM    EQU $A130C3      ; Div latch high byte
 UART_DVID   EQU $A130C3      ; Device ID
-UART_OP2    EQU $A130C9      ; OP2
 
 ; These registers are set in a specific order. This is important to note!
 
