@@ -6,6 +6,8 @@ Retro.Link is an Ethernet cartridge adapter. It facilitates the use of networkin
 The adapter is built using an XR16C850 UART chip and a Lantronix XPICO module. These components provide the adapter with 128-byte hardware send and receive buffers, allowing for efficient data transmission at 921600 baud.
 
 # Key Characteristics
+* The device can open a direct byte stream with a TCP endpoint. You can define your own protocol or packet format that fits your needs.
+
 * The adapter is configured to be able to make a single TCP connection to any domain or IP address. The adapter is set to listen specifically on port 5364 for a single incoming connection.
 
 * By default, all incoming TCP connections are blocked upon bootup and during runtime until reconfigured via a designated register.
