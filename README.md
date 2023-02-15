@@ -3,7 +3,7 @@
 Retro.Link is an Ethernet cartridge adapter. It facilitates the use of networking functions in homebrew and existing games, but only if the software has been programmed to interact with the hardware. Currently the Sega Genesis is supported officially but the Super Nintendo is being investigated currently.
 
 # Hardware Details
-The adapter is built using an XR16C850 UART chip and a Lantronix XPICO module. These components provide the adapter with 128-byte hardware send and receive buffers, allowing for efficient data transmission at 921600 baud.
+The adapter is built using an [XR16C850](https://www.mouser.com/datasheet/2/146/16c850_231_080905-1889024.pdf) UART chip and a Lantronix [Xpico](https://cdn.lantronix.com/wp-content/uploads/pdf/xPico_UG.pdf) module. These components provide the adapter with 128-byte hardware send and receive buffers, allowing for efficient data transmission at 921600 baud.
 
 # Key Characteristics
 * The device can open a direct byte stream with a TCP endpoint. You can define your own protocol or packet format that fits your needs.
