@@ -144,7 +144,7 @@ The above pseudo code concept also applies for transitions into gameplay or char
 anything that requires player input. Be sure to clear fifos/buffers before all of this to avoid unforseen issues.
 
 * In closing
-Thanks for reading. While this isnt a comprehensive guide, it shows a few tips learned over time while
+Thanks for reading. While this isn't a comprehensive guide, it shows a few tips learned over time while
 developing the hardware and attempting to add code to existing games and even new homebrew games. 
 
 If you'd like to add information you feel is relevant and important to the process that should be known

@@ -36,16 +36,16 @@
 ;** DEFINES                                                     **
 ;*****************************************************************
 
-UART_RHR            EQU $A130C1      ; Receive holding register
-UART_THR            EQU $A130C1      ; Transmit holding register
-UART_IER            EQU $A130C3      ; Interrupt enable register
-UART_FCR            EQU $A130C5      ; FIFO control register
-UART_LCR            EQU $A130C7      ; Line control register
-UART_MCR            EQU $A130C9      ; Modem control register
-UART_LSR            EQU $A130CB      ; Line status register
-UART_DLL            EQU $A130C1      ;
-UART_DLM            EQU $A130C3      ;
-UART_DVID           EQU $A130C3      ; DEVICE ID
+UART_RHR        EQU $A130C1         ; Receive holding register
+UART_THR        EQU $A130C1         ; Transmit holding register
+UART_IER        EQU $A130C3         ; Interrupt enable register
+UART_FCR        EQU $A130C5         ; FIFO control register
+UART_LCR        EQU $A130C7         ; Line control register
+UART_MCR        EQU $A130C9         ; Modem control register
+UART_LSR        EQU $A130CB         ; Line status register
+UART_DLL        EQU $A130C1         ;
+UART_DLM        EQU $A130C3         ;
+UART_DVID       EQU $A130C3         ; Device ID
 
 ;-----------------------------------
 ; GAME RAM VARIABLES
@@ -77,7 +77,7 @@ P2_SLOT6_AMMO   EQU $FF82C4         ; (L) SLOT 6 AMMO
 MENU_POSITION   EQU $FFFFC89F       ; (B) 2=VS MODE
 VBL_COUNTER     EQU $FFFF8066       ; (W) VBLANK COUNTER
 
-SCREEN          EQU $ffff8430       ; (W) CURRENT SCREEN WE'RE ON
+SCREEN          EQU $FFFF8430       ; (W) CURRENT SCREEN WE'RE ON
                                     ; SEGA LOGO = $1BE0
                                     ; DOMARK LOGO = $1BC0
                                     ; TITLE SCREEN = $75C0
@@ -86,6 +86,7 @@ SCREEN          EQU $ffff8430       ; (W) CURRENT SCREEN WE'RE ON
                                     ; SINGLE PLAYER = $0E20
                                     ; VS GAME = $07A0
                                     ; COOP GAME = $11E0
+
 ;******************************************
 ; CUSTOM RAM VARIABLES                   **
 ;******************************************
@@ -124,8 +125,8 @@ STARTUP:
     MOVE.B  #$80, UART_LCR           ; SETUP VARS TO READ DEVICE ID ON UART
     MOVE.B  #$00, UART_DLM           ;
     MOVE.B  #$00, UART_DLL           ;
-;   CMP.B   #$10, UART_DVID          ; EXPECTED VALUE?
-;   BNE.S   @NOT_FOUND               ; IF NOT, JUST EXIT AND DO NORMAL GAME
+    CMP.B   #$10, UART_DVID          ; EXPECTED VALUE?
+    BNE.S   @NOT_FOUND               ; IF NOT, JUST EXIT AND DO NORMAL GAME
 @INIT_UART:
     MOVE.B  #$83, UART_LCR           ; INIT UART
     MOVE.B  #$00, UART_DLM           ;
@@ -148,8 +149,8 @@ STARTUP:
 READ_JOYPAD:
     ADDQ.L  #6,A7                    ; FORGET TRAP EVER HAPPENED
 
-    MOVE.L  #0xFFFFFFFF,0xFFFF8094   ; PART OF THEIR JOYPAD READ FUNCTION
-    MOVE.L  #0xFFFFFFFF,0xFFFF8098   ; PART OF THEIR JOYPAD READ FUNCTION
+    MOVE.L  #0xFFFFFFFF,0xFFFF8094   ; PART OF ORIGINAL JOYPAD READ FUNCTION
+    MOVE.L  #0xFFFFFFFF,0xFFFF8098   ; PART OF ORIGINAL JOYPAD READ FUNCTION
     
     MOVEQ   #0,D1                    ; SIGNAL TO READ JOYPAD 1
     JSR     $0000E0EE                ; READ JOYPAD AND RETURN DATA IN D0.W
@@ -251,7 +252,8 @@ STORE_SLAVE:
 ;*******************************************************************************
 ; This is blanket network tranfer/receive function. It has no real error
 ; handling and only times out if we haven't received data within a certain number
-; of frames and locks the game with a red background.
+; of frames and locks the game with a red background. We are sending and receiving
+; position, lives, lifebar data and joypad inputs
 
 NETWORK_SEND:
     CMP.B   #'M',WHOAMI
@@ -342,9 +344,9 @@ NETWORK_SEND:
 ;*******************************************************************************
 ; RECEIVE DATA INTO D0.W
 NETWORK_RECEIVE:
-    CMP.B   #'M',WHOAMI
-    BEQ.S   @SETUP_MASTER
-    BRA.S   @SETUP_SLAVE
+    CMP.B   #'M',WHOAMI             ; Is our ID byte master?
+    BEQ.S   @SETUP_MASTER           ; branch and do master code
+    BRA.S   @SETUP_SLAVE            ; otherwise do slave code.
 @SETUP_MASTER:
     LEA     P2_ZAXIS,A0
     LEA     P2_ANGLE,A1
