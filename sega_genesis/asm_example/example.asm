@@ -31,6 +31,7 @@ Detect_Adapter:
     move.b  #$07, UART_FCR   ;  flush send/receive fifos
     move.b  #$00, UART_IER
     move.b  #1,cart_present
+    rts
 @Not_Found:
     clr.b   cart_present
     rts
