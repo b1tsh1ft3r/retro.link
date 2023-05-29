@@ -40,12 +40,10 @@ in gameplay can be super evil and can fight you every step of the way to keep th
 duplicating the same thing on both ends over a variable speed connection (internet).
 
 One way you can help keep them running/rendering synchronized is by using data from the 
-HVCounter. This data is a word at $C00008 on the sega genesis. The vertical counter is what
-we're particularly interested in however which is a byte at $C00009, but we can't read from 
-$C00009 directly. Read a word of data from $C00008 and isolate it to get the vertical count.
+VCounter. This data is a byte at $C00009. Read a byte of data from $C00009 to get the 
+vertical counter value.
 
-    MOVE.W  $C00008,D0            ; Get HVCounter value to D0
-    LSR.W   #8,D0                 ; Shift over to point to vcounter value (byte)
+    MOVE.B  $C00009,D0            ; Get HVCounter value to D0
 
 We send the vertical counter value byte from one machine to the other. Once received you can 
 compare the received remote value versus the local vertical count value and then switch 
