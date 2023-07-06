@@ -1,0 +1,3096 @@
+;	File:	mk2patch.68k
+;
+;	Contains:	Patches for MK][
+;
+;	Written by:	Joe Britt (portions ripped from Shannon & Perlman)
+;
+;	Copyright 1994 by Catapult Entertainment, Inc., all rights reserved.
+;
+;	Change History (most recent first):
+;
+
+	include "GPEqu.a"
+	include "harddef"
+
+FORSERVER	equ	1	; BE SURE TO TURN THIS ON FOR SERVER BUILDS!
+
+patchBase	equ	$0
+
+
+patchFrame	record	0
+raddr	ds.l	1
+command	ds.l	1
+pdata1	ds.l	1
+pdata2	ds.l	1
+	endr
+
+
+	MACHINE	MC68000
+	OPT	NOCLR
+	STRING	ASIS
+
+
+; --------------------------------------------------------------------------
+; Debugger Macros
+
+	macro
+	POLHOST
+	dc.w	$a000
+	endm
+
+	macro
+	DEBUGGER
+	dc.w	$a003
+	endm
+
+
+
+; --------------------------------------------------------------------------
+; Z80 Control Macros
+
+FMBase	    equ	$A04000
+FMAddr13	equ	$A04000	; write the addr of the desired chip reg here...
+FMData13	equ	$A04001	; then write the data here
+FMAddr46	equ	$A04002	; write the addr of the desired chip reg here...
+FMData46	equ	$A04003	; then write the data here
+
+	macro
+	Assert_Z80_BusReq 
+	move.w #$0100,$A11100	; bus req on
+	endm
+
+	macro
+	Release_Z80_BusReq 
+	move.w #$0000,$A11100	; bus req off
+	endm
+
+	macro
+	Assert_Z80_Reset 
+	move.w #$0000,$A11200	; take z80 into reset
+	endm
+
+	macro
+	Release_Z80_Reset 
+	move.w #$0100,$A11200	; release z80 reset
+	endm
+
+	macro
+	Wait_Z80_BusAck &d
+	move.l	#500,&d	; 500 tests @ 3.25æs --> 1.625ms timeout
+@ZBA	tst.w $A11100	; have we got the bus?	16 = 4+12
+	dbeq	&d,@ZBA	;	10 --> 26 * 125ns = 3.25æs
+	endm
+
+	macro
+	Turn_Off_PSG &a
+	lea	$C00011,&a	; PSG port
+	move.b	#$9f,(&a)	; Tone Gen #1 off
+	move.b	#$bf,(&a)	; Tone Gen #2 off
+	move.b	#$df,(&a)	; Tone Gen #3 off
+	move.b	#$ff,(&a)	; Noise Gen off
+	endm
+
+	macro
+	KeyUpAll6FMVoices &d
+	moveq	#5,&d	; there are 6 operators
+@1
+	tst.b	FMAddr13	; spin wait on the stupid sound chip
+	bmi.s	@1
+	move.b	#$28,FMAddr13
+	move.b	&d,FMData13	;key up!
+	dbra	&d,@1
+	endm
+
+; --------------------------------------------------------------------------
+; Stinkotron Macros
+
+	MACRO
+	INTERLACE_MODE
+	move.w	interlaceOn(a5),$c00004	; turn on interlace mode
+	ENDM
+
+	MACRO
+	NON_INTERLACE_MODE
+	move.w	interlaceOff(a5),$c00004	; turn off interlace mode
+	ENDM
+
+
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; Game Constants/Addresses
+
+gamePatchID	equ	$C4CDDF0C
+
+gameHBLAddr	equ	$00000400
+gameVBLAddr	equ	$0000030e
+gameVBLPostReadCtrls	equ	$0000032c
+
+gameController1	equ	$fffff9d2	; both controllers are munged longs
+gameController2	equ	$fffff9e0
+
+
+roundPatchAddr	equ	$00006468	; this replaces patch 9 after the logos have been done
+
+patch9Addr	equ	$0002AFA4	; art is up, resync for button press to skip
+patch10Addr	equ	$0002AFDA	; logo screen going away, install game VBL so drawing works
+
+patch0Replay	equ	$00029B3C	; patch 0 for a replay, only show the sega logo
+
+patch0Addr	equ	$00029B48	; patch after logos
+patch1Addr	equ	$0000349C	; choose fighter
+patch2Addr	equ	$0000404C	; background
+patch3Addr	equ	$00003DAC	; game completed, check how many games played
+patch4Addr	equ	$0000459A	; score-resetting subroutine
+patch5Addr	equ	$00004114	; game over DMA
+patch6Addr	equ	$00006C88	; portal stage/Smoke check
+
+patch7Addr	equ	$000066BA	; Finish HER voice
+patch8Addr	equ	$000066CA	; Finish HIM voice
+
+singlePatch0Addr	equ	$00003E28
+
+
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; Patch Constants
+;
+
+magicAddr	equ	$64
+
+HBLVector	equ	$70
+VBLVector	equ	$78
+
+TrapOp	equ	$4e40	; Trap opcode
+
+StdRAMBase	equ	$200000	; Base of RAM at boot up
+
+ExceptionRAMBase	equ	$390000
+ExceptionROMBase	equ	$300000
+
+ExceptionRAMBound	equ	(ExceptionRAMBase+$18000)
+ExceptionROMBound	equ	(ExceptionROMBase+$80000)
+
+kFalse	equ	$00
+kTrue	equ	$ff
+
+trap0Vector	equ	$00000080
+trap1Vector	equ	$00000084
+trap2Vector	equ	$00000088
+trap3Vector	equ	$0000008c
+trap4Vector	equ	$00000090
+trap5Vector	equ	$00000094
+trap6Vector	equ	$00000098
+trap7Vector	equ	$0000009c
+trap8Vector	equ	$000000a0
+trap9Vector	equ	$000000a4
+trap10Vector	equ	$000000a8
+
+trap0	equ	$4e40
+trap1	equ	$4e41
+trap2	equ	$4e42
+trap3	equ	$4e43
+trap4	equ	$4e44
+trap5	equ	$4e45
+trap6	equ	$4e46
+trap7	equ	$4e47
+trap8	equ	$4e48
+trap9	equ	$4e49
+trap10	equ	$4e4a
+
+
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; Syncotron Constants
+
+echoByte	equ	$36	; lsb carries b6 of VCnt in slave echo
+echoMask	equ	$3e
+deferEarly1	equ	$01	; 0000 0001
+inTime1	equ	$02	; 0000 0010
+deferLate1	equ	$03	; 0000 0011
+deferEarly2	equ	$04	; 0000 0100
+inTime2	equ	$08	; 0000 1000
+deferLate2	equ	$0c	; 0000 1100
+
+readVCnt	equ	$5d	; Vcnt at safe read time (can be as late as $5d (resync $61) entering rxThreeBytes)
+deferEarlyVCnt	equ	readVCnt-$a	; defer early between this and readVCnt
+
+syncJitter	equ	$3	; acceptable synchronization jitter
+syncOTronMargin	equ	syncJitter*2+2	; VCnt drift on each side before syncOTron kicks in
+deferLateVCnt	equ	readVCnt+$a-kMaxVCnt-1	; defer late between readVCnt and this
+halfLinesPerVCnt	equ	$55f	; 1/2 line = 31.778 ?sec. VCnt = 170.7 ?sec.
+	;	170.7/31.778 = 5.37. $55f = 5.375 << 8.
+holdOffDelay	equ	$12
+
+eqmThreshold	equ	3000
+
+int	equ	$83	; vdp command and interlace message
+nonInt	equ	$81	; vdp command and nonInterlace message
+
+noData	equ	$03	; avoids start,A,B,or C tripping something off
+illegalTimeStamp	equ	$62	; rxThreeBytes needs this to be positive
+
+syncLock	equ	$10	; b2-b0 is latency
+syncMask	equ	syncLock
+latencyMask	equ	$07	; b2-b0 is latency
+maxLatency	equ	$8	; longest latency we can handle (3 bits normalized 1-8)
+
+maxFrameSpread	equ	8
+readDelayFifoSize	equ	maxFrameSpread+maxLatency
+
+waitForEchoTimeOut	equ	2*(MaxLatency+1)*(kMaxVCnt+1) ; VCnts to wait for echo timeout
+waitForMessageTimeOut	equ	2*(MaxLatency+1)*(kMaxVCnt+1) ; VCnts to wait for echo timeout
+
+txData	equ	kDefaultInternal+kTxBuff+1
+
+holdOff	equ	$0b
+
+;rxFifoSize	equ	maxLatency*2	; last offset from rxFifo (must be even!)
+;rxPipeSize	equ	16
+
+rxFifoSize	equ	maxLatency*4	; last offset from rxFifo (must be even!)
+rxPipeSize	equ	32
+
+; ErrorList codes
+
+lostSyncErr	equ	$1
+SequenceErr	equ	$2
+rxFifoOverFlowErr	equ	$3
+UnknownModeErr	equ	$5
+LastFrameReached	equ	$6
+exceptError	equ	$7
+rxPipeOverFlowErr	equ	$B
+framingError	equ	$E
+rxOverrunError	equ	$F
+masterSyncErr1	equ	$10
+masterSyncErr2	equ	$11
+slaveSyncErr1	equ	$12
+slaveSyncErr2	equ	$13
+slaveSyncErr3	equ	$14
+spreadError	equ	$15
+
+
+
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; Patch Vars
+;
+
+patchVars	record	0
+patchDataTbl	ds.w	1	; points to 32-byte aligned patch data
+coldBootFlag	ds.b	1
+gamesElapsed	ds.b	1	; allow several 'games' before returning to OS
+randomSeed	ds.l	1
+singleGameTicks	ds.l	1
+singleShiftTicks	ds.l	1
+singleShiftCount	ds.l	1
+singleLEDShift	ds.l	1
+
+lastWas6Button	ds.b	1	; note byte var below
+
+StinkoVarsStart	ds.b	0	; Stinkotron vars
+
+deferFlag	ds.b	1	; note byte var above
+slewCount	ds.w	1
+slewHold	ds.w	1
+interlaceOn	ds.w	1
+interlaceOff	ds.w	1
+
+int_NonInt	ds.l	1
+syncOCompletion	ds.l	1	; pointer to syncOTron completion routine
+
+horizEna	ds.w	1	; re-enable horizontal interrupts reg #0 value
+
+errorFrame	ds.b	6	; unwanted exception SR & PC
+errorType	ds.w	1	; fatal error type
+
+holdWord	ds.w	1	; word disassembly for getNextThree
+
+pad1	ds.b	1
+vHold	ds.b	1
+
+ctrl1TentStore	ds.b	1	; tentative read store
+ctrl2TentStore	ds.b	1	; tentative read store
+
+ctrl1Hold	ds.b	1	; Hold betw syncCtrl and readCtrl
+ctrl2Hold	ds.b	1	; Hold betw syncCtrl and readCtrl
+ctrl3Hold	ds.b	1	; Hold betw syncCtrl and readCtrl
+ctrl4Hold	ds.b	1	; Hold betw syncCtrl and readCtrl
+
+frameOffset	ds.b	1	; frames offset during catch up. Word ptr.
+holdOffByte	ds.b	1	; byte to read during rxHoldOff
+straightData	ds.b	1	; flag to encode or not encode tx'd data
+pad	ds.b	1	; unused
+
+
+preservedSyncoVars	ds.b	0	; vars above this line are nukeable
+
+rxFifo	ds.w	rxFifoSize	; rxFifo ring buffer
+rxFifoHead	ds.w	1	; oldest entry offset from rxFifo
+rxFifoTail	ds.w	1	; newest entry offset from rxFifo
+
+rxPipe	ds.w	rxPipeSize
+rxPipeHead	ds.w	1	; oldest entry offset from rxPipe
+rxPipeTail	ds.w	1	; newest entry offset from rxPipe
+
+rxPipeBytes	ds.b	1	; number of bytes in rxPipe
+rxHoldoff	ds.b	1
+prevFifoEmpty	ds.b	1	; prev frame had a fifo empty
+pad2	ds.b	1
+
+syncOTxByte	ds.b	1	; byte for syncOTron to send
+syncORxByte	ds.b	1	; byte received by syncOTron
+
+
+startUploadBlock	ds.b	0
+
+myGameID	ds.l	1	; yet another thing for fadden's Sun
+
+syncFlagSkips	ds.l	1
+rxFifoEmptyCount	ds.l	1
+lateCount	ds.l	1
+lostSyncCount	ds.l	1
+caughtLateCount	ds.l	1
+gameFrames	ds.l	1
+
+refTimeStamp	ds.b	1
+lastTimeStamp	ds.b	1
+latencyCount	ds.b	1
+isLeader	ds.b	1
+
+callWaitingCount	ds.b	1
+gameHoldOff	ds.b	1	; (counts by 2) frames to hold off while other catches up
+
+p1RoundWins	ds.b	1	; P1 wins THIS ROUND
+p2RoundWins	ds.b	1	; P2 wins THIS ROUND
+
+errRecoverTime	ds.l	1	; error recovery timeout tick count
+
+inResync	ds.b	1	; Nonzero -> in resync
+uploadPad1	ds.b	1
+
+uploadPad2	ds.b	1	; pads for andy2's funny Sun
+uploadPad3	ds.b	1
+
+endUploadBlock	ds.b	0
+
+readDelayPtr	ds.w	1
+readDelayFifo	ds.w	readDelayFifoSize
+
+lastVar	ds.b	0
+	endr
+patchVarsSize	equ	patchVars.lastVar-patchVars.patchDataTbl
+
+
+; --------------------------------------------------------------------------
+; long PatchEntry ( long command, long data1, long data2 );
+;
+
+PatchEntry	proc
+	org	patchBase
+	with	patchVars
+
+	move.l	patchFrame.command(sp),d0
+
+	cmpi.l	#kGPInitGamePatch,d0
+	beq.s	initGamePatch
+
+	cmpi.l	#kGPStartGamePatch,d0
+	beq	startGamePatch
+
+	cmpi.l	#kGPPlaySinglePlayer,d0
+	beq	playSingle
+death:
+	moveq	#-1,d0
+	rts
+
+
+
+
+
+initGamePatch:
+	move.l	#patchVarsSize,-(sp)	; get space for our state
+	move.w	#kPerm,-(sp)
+	OSNewMemory
+	add.l	#6,sp
+
+	tst.l	d0
+	beq.s	death
+
+	lea	varptr,a0	; varptr -> our stuff
+	move.l	d0,(a0)
+
+	move.l	#128,-(sp)	; 128 bytes assures a 32-byte aligned section
+	move.w	#kPerm,-(sp)
+	OSNewMemory
+	add.l	#6,sp
+
+	tst.l	d0
+	beq.s	death
+
+	movea.l	varptr,a5
+	move.w	d0,d1	; align it
+	andi.w	#$1f,d1
+	beq.s	@aligned
+	move.w	#32,d2
+	sub.w	d1,d2
+	add.w	d2,d0
+@aligned
+	move.w	d0,patchDataTbl(a5)
+
+	lea	warmBootFlag(pc),a0
+	clr.w	(a0)	; flag cold boot
+
+	moveq	#0,d0
+	rts
+
+
+
+
+FredInitTable:
+	dc.w	trap0	; skip titles
+	dc.w	trap1	; choose fighter
+	dc.w	trap2	; start screen
+	dc.w	trap3	; play game background
+	dc.w	trap4	; always start 2-player game
+	dc.w	trap5	; game over dma
+	dc.w	trap6	; logo screen sync
+	dc.w	trap7	; logo screen going away
+	dc.w	0	; zero-terminated
+
+SingleGameMemTable:
+	dc.b	kMagicAddrByte0,	((magicAddr >> (0+1)) AND $FF)	; magic addr is WORD addr
+	dc.b	kMagicAddrByte1,	((magicAddr >> (8+1)) AND $FF) 
+	dc.b	kMagicAddrByte2,	(((magicAddr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kROMBase,	((ExceptionROMBase >> (8+6)) AND $FF)
+	dc.b	kROMBound,	((ExceptionROMBound >> (8+6)) AND $FF)
+
+	dc.b	kRAMBaseByte0,	((ExceptionRAMBase >> 6) AND $FF)
+	dc.b	kRAMBaseByte1,	((ExceptionRAMBase >> (8+6)) AND $FF)
+	dc.b	kRAMBoundByte0,	((ExceptionRAMBound >> 6) AND $FF)
+	dc.b	kRAMBoundByte1,	((ExceptionRAMBound >> (8+6)) AND $FF)
+
+	dc.b	kPatch_0_Byte0,	((patch0Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_0_Byte1,	((patch0Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_0_Byte2,	(((patch0Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_1_Byte0,	((patch1Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_1_Byte1,	((patch1Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_1_Byte2,	(((patch1Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_2_Byte0,	((patch2Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_2_Byte1,	((patch2Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_2_Byte2,	(((patch2Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_3_Byte0,	((patch3Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_3_Byte1,	((patch3Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_3_Byte2,	(((patch3Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_4_Byte0,	((patch4Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_4_Byte1,	((patch4Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_4_Byte2,	(((patch4Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_5_Byte0,	((patch5Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_5_Byte1,	((patch5Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_5_Byte2,	(((patch5Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_6_Byte0,	((patch6Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_6_Byte1,	((patch6Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_6_Byte2,	(((patch6Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_7_Byte0,	((patch7Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_7_Byte1,	((patch7Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_7_Byte2,	(((patch7Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_8_Byte0,	((patch8Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_8_Byte1,	((patch8Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_8_Byte2,	(((patch8Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_9_Byte0,	((patch9Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_9_Byte1,	((patch9Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_9_Byte2,	(((patch9Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kPatch_10_Byte0,	((patch10Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_10_Byte1,	((patch10Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_10_Byte2,	(((patch10Addr >> (16+1)) AND $FF) OR $60)
+
+	dc.b	kEnableByte1,	kzeroPageEnable + ktransAddrEnable + kVector8Ena + kVector9Ena + kVector10Ena
+	dc.b	kEnableByte0,	kVector0Ena + kVector1Ena + kVector2Ena + kVector3Ena + kVector4Ena + kVector5Ena + kVector6Ena + kVector7Ena
+
+	dc.b	0,0
+
+
+SingleGamePatches
+	dc.w	trap0
+	dc.w	0
+	dc.b	kPatch_0_Byte0,	((singlePatch0Addr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_0_Byte1,	((singlePatch0Addr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_0_Byte2,	(((singlePatch0Addr >> (16+1)) AND $FF) OR $60)
+	dc.b	kEnableByte1,	kzeroPageEnable + ktransAddrEnable
+	dc.b	kEnableByte0,	kVector0Ena
+
+	dc.b	0,0
+
+
+FredInitReplay
+	dc.b	kPatch_0_Byte0,	((patch0Replay >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_0_Byte1,	((patch0Replay >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_0_Byte2,	(((patch0Replay >> (16+1)) AND $FF) OR $60)
+	dc.b	kEnableByte1,	kzeroPageEnable + ktransAddrEnable + kVector8Ena	; turn off logo screen vectors
+
+	dc.b	0,0
+
+
+RoundCounterPatches
+	dc.b	kPatch_9_Byte0,	((roundPatchAddr >> (0+1)) AND $FF)	; all patch addrs are 
+	dc.b	kPatch_9_Byte1,	((roundPatchAddr >> (8+1)) AND $FF)	; WORD addrs
+	dc.b	kPatch_9_Byte2,	(((roundPatchAddr >> (16+1)) AND $FF) OR $60)
+	dc.b	kEnableByte1,	kzeroPageEnable + ktransAddrEnable + kVector8Ena + kVector9Ena	; turn off logo screen vector 10
+	dc.b	0,0
+
+
+
+startGamePatch:
+	bsr	InitPsyq	; if we have suq, let it install it's vecs
+
+	move.l	varptr,d0
+	andi.l	#$FFFF,d0	; for a start w/o init, zorch the upper word
+	movea.l	d0,a5	; a5 -> patch vars
+
+	move.l	#ExceptionRAMBase,d1
+	sf	gameHoldOff(a5)	; clear gameHoldOff flag to init readDelayFifo
+	bsr	fullInitSyncoVars	; trashes a0
+
+
+	movea.l	gGameParams,a0
+
+	move.l	#gamePatchID,myGameID(a5)	; give fadden something to switch off of
+	move.b	GameParams.isMaster(a0),isLeader(a5)	; init misc patch vars
+	st	coldBootFlag(a5)
+	sf	gamesElapsed(a5)
+	move.l	#$87654321,randomSeed(a5)	; same initial seed as the game
+ 
+	lea	startUploadBlock(a5),a1
+	move.l	a1,GameParams.dbIDDataPtr(a0)
+	move.l	#(endUploadBlock-startUploadBlock),GameParams.dbIDDataSize(a0)
+
+	move.l	GameParams.commSession(a0),d3	; we'll need this in a bit
+
+	add.l	#ExceptionRAMBase,a0	; RAM offset the game params...
+	lea	myGameParams(pc),a1
+	move.l	a0,(a1)	; ...and stash it
+
+
+	; the calling order for these 2 GT funcs is important, as both slam the controller
+	; and readmodem vectors
+
+	move.w	#k19BitData,-(sp)	; 3 byte packet format
+	move.l	d3,-(sp)	; push session
+	OSGTSession_SetGTPacketFormat	; tell LameTalk what kind of packets we'd like
+	adda.l	#6,sp	; clean up
+	tst.l	d0
+	bmi	spinDeath
+
+
+	move.l	#(ExceptionROMBase-StdRAMBase),-(sp)	; push rom offset
+	move.l	#(ExceptionRAMBase-StdRAMBase),-(sp)	; push ram offset
+	move.l	d3,-(sp)	; push session
+	OSGTSession_SetRamRomOffsets	; tell LameTalk what our RAM & ROM offsets are
+	adda.l	#12,sp	; clean up
+	tst.l	d0
+	bmi	spinDeath
+
+
+	add.l	#ExceptionRAMBase,d3	; RAM offset the session
+	lea	mySession,a0
+	move.l	d3,(a0)
+
+
+	move.l	#ExceptionRAMBase,gRamOffset	; tell OS where to put RAM
+	move.l	#ExceptionROMBase-StdRAMBase,gRomOffset	; tell OS where to put ROM
+
+
+	lea	miscException(pc),a0	; init except vecs
+	movea.l	#$00000004,a1
+	move.l	#10,d0	; reset -> F-line
+@initExVecs
+	if FORSERVER then
+	move.l	a0,(a1)+	; ENABLE FOR SERVER BUILDS
+	endif
+	dbra	d0,@initExVecs
+
+
+	move.l	#gameVBLAddr,VBLVector	; initially use cart's VBL unmodified
+
+
+	lea	kDefaultInternal,a1	; needed by vtable setup & loadfredfromtable
+	lea	FredInitTable,a0	; normal Patch init table
+	bsr	LoadFredFromTable	; set up Fred
+
+	lea	warmBootFlag(pc),a0
+	cmpi.w	#'JB',(a0)	; is this a replay?
+	bne.s	@notAReplay
+
+	lea	FredInitReplay,a0	; for a replay, don't show all the logo screens
+	bsr	LoadFredNoPatches
+
+@notAReplay
+	lea	warmBootFlag(pc),a0	; been thru once, flag replay
+	move.w	#'JB',(a0)
+
+	bsr	MapMemForGame	; map in the cart, come back high
+
+
+	lea	afterAttractPatch(pc),a0	; init patch trap vectors
+	move.l	a0,trap0Vector
+
+	lea	chooseFighterPatch(pc),a0
+	move.l	a0,trap1Vector
+
+	lea	playBackgroundPatch(pc),a0
+	move.l	a0,trap2Vector
+
+	lea	gamesElapsedPatch(pc),a0
+	move.l	a0,trap3Vector
+
+	lea	dontResetScorePatch(pc),a0
+	move.l	a0,trap4Vector
+
+	lea	gameOverDMAPatch(pc),a0
+	move.l	a0,trap5Vector
+
+	lea	syncForSkipButtonPatch(pc),a0	; logo screen patch
+	move.l	a0,trap6Vector
+
+	lea	logoGoingAwayPatch(pc),a0	; logo screen patch
+	move.l	a0,trap7Vector
+
+
+	lea	GameTalkPatchVBL,a0	; init the vbl vectors
+	lea	GTVBLVector,a2	; note the vector ordering is important
+	move.l	a0,(a2)+
+	lea	runModeVBL,a0
+	move.l	a0,(a2)+
+	lea	slewModeVBL,a0
+	move.l	a0,(a2)+
+	lea	syncLockModeVBL,a0
+	move.l	a0,(a2)+
+	lea	establishSyncModeVBL,a0
+	move.l	a0,(a2)+
+
+
+playCommon:
+	adda.l	#ExceptionRAMBase,a5	; offset our variables ptr
+	lea	varptr,a0
+	move.l	a5,(a0)
+
+	move.w	patchDataTbl(a5),d0
+	lsr.w	#5,d0
+	move.b	d0,kVTableBaseByte0(a1)	; a1 must be already set up!
+	lsr.w	#8,d0
+	move.b	d0,kVTableBaseByte1(a1)
+
+	move.l	#gameHBLAddr,HBLVector	; use cart's HBL routine unmodified
+
+	move.b	#0,kDefaultInternal+kLEDData	; all LEDs off
+	st	kDefaultInternal+kLEDEnable	; enable LEDs
+
+	jmp	$200	; jump into cart
+
+
+
+playSingle:
+	bsr	InitPsyq	; if we have suq, let it install its vecs
+
+	bsr	initGamePatch	; we need a patch data table, a5 -> vars
+
+	lea	doGameVBL,a1	; non-net registered VBL
+
+	lea	singleGameTicks(a5),a0
+	move.l	patchFrame.pData2(sp),d0
+	beq.s	@noNetTimeOut	; timeout = 0 --> not net registered
+
+	add.l	#3600,d0	; make timeout 1 minute bigger so we don't interrupt games as much
+	move.l	d0,(a0)	; save the timeout
+
+	sub.l	gTicks,d0	; timeout - curTicks = deltaTicks
+	lsr.l	#3,d0	; /8 for 7 LEDs + gone
+	move.l	d0,singleShiftTicks(a5)
+	move.l	#0,singleShiftCount(a5)
+	move.l	#0,singleLEDShift(a5)
+
+	lea	PlaySingleVBL,a1	; use our vbl to keep track of time and check for rings
+
+@noNetTimeout
+	adda.l	#ExceptionRAMBase,a1
+	move.l	a1,VBLVector
+
+	lea	kDefaultInternal,a1	; needed by vtable setup & loadfredfromtable
+	lea	SingleGameMemTable,a0	; init rest of Fred hardware
+	bsr.s	LoadFredNoPatches	; set up Fred
+
+	lea	SingleGamePatches,a0
+	bsr.s	LoadFredFromTable
+
+	bsr.s	MapMemForGame
+
+	lea	singlePlayerGameOver(pc),a0	; init patch trap vector
+	move.l	a0,trap0Vector
+
+	bra	playCommon
+
+
+
+MapMemForGame:
+	move.l	#$4e714e75,magicAddr
+
+	move.b	#kEnFixedInternal+kRomHi+kEnSafeRom,kDefaultControl+kControlReg
+
+	move.w	$0,d0	; read zero page
+	move.b	#kForce,kDefaultControl+kKillReg	; set up for the transition 
+	lea	safeRAMReturn,a0
+	add.l	#ExceptionRAMBase,a0
+	move.l	a0,-(sp)
+
+	jmp	magicAddr	; trigger addr map flip
+
+safeRAMReturn	; return here from flip
+	add.l	#ExceptionRAMBase,(sp)	; fix up return address
+	rts
+
+
+AdjustOffsetsForGame:
+	move.l	#ExceptionRAMBase,d3
+	move.l	d3,gRamOffset
+	bsr	MySetMemOffsets
+	rts
+
+
+
+
+
+; --------------------------------------------------------------------------
+; a0 -> table to init from (first patch words, then fred init data)
+; a1 -> current fred regs
+; a5 -> vars (LoadFredNoPatches doesn't care)
+
+LoadFredFromTable:
+	movea.w	patchDataTbl(a5),a2	; ptr to patch data table
+@initTrapTable
+	move.w	(a0)+,d0
+	beq.s	LoadFredNoPatches	; 0-terminated list
+	move.w	d0,(a2)+
+	bra.s	@initTrapTable
+
+LoadFredNoPatches:
+	moveq	#0,d0
+@nextFredReg
+	move.b	(a0)+,d0	; fred reg offset
+	beq.s	@doneFredInit	; 0-terminated list
+
+	cmpi.b	#kEnableByte0,d0
+	bne.s	@checkForEnable1
+	lea	enable_0_Stash(pc),a2
+	move.b	(a0),(a2)
+	; slower but smaller
+@checkForEnable1
+	cmpi.b	#kEnableByte1,d0
+	bne.s	@notanEnable
+	lea	enable_1_Stash(pc),a2
+	move.b	(a0),(a2)
+
+@notanEnable
+	move.b	(a0)+,0(a1,d0.w)	; fred data
+	bra.s	@nextFredReg
+@doneFredInit
+	rts
+
+
+
+ClearHitEnables:
+	move.b	#(kzeroPageEnable + ktransAddrEnable),kDefaultInternal+kEnableByte1
+	move.b	#$00,kDefaultInternal+kEnableByte0
+	rts
+
+
+RestoreHitEnables:
+	move.b	enable_1_Stash(pc),kDefaultInternal+kEnableByte1
+	move.b	enable_0_Stash(pc),kDefaultInternal+kEnableByte0
+	rts
+
+
+; ==========================================================================
+; PATCHES
+
+;
+; Attract screens run like this:
+;
+;	Sega & Text page - free run, no skipping allowed
+;	- sync -
+;	Acclaim - Start skips
+;	- sync -
+;	Probe - Start skips
+;	- sync -
+;	Midway Presents - Start skips
+;	- sync -
+;	Game begins
+;
+
+
+; trap 9
+; art for a logo screen is up, resync for skip button
+
+syncForSkipButtonPatch
+	addq.l	#6,a7	; pop return addr and sr
+
+	movem.l	a0-a6/d0-d7,-(sp)
+
+	move.l	varptr,a5
+	bsr	flushSerial
+
+	bsr	partInitSyncoVars
+	move.l	vEstabSyncMode,VBLVector
+
+	movem.l	(sp)+,a0-a6/d0-d7
+
+	clr.l	$ffff8890	; zero VBL count
+	jmp	$2AFA8
+
+
+
+
+
+; trap 10
+; logo screen is going away, install game VBL for next drawing
+
+logoGoingAwayPatch
+	addq.l	#6,a7	; pop return addr and sr
+	move.l	#gameVBLAddr,VBLVector
+	rts
+
+
+
+
+; trap 0
+; All logos done, resync & force us to the Choose Fighter screen
+
+afterAttractPatch
+	addq.l	#6,a7	; pop return addr and sr
+
+	movem.l	a0-a6/d0-d7,-(sp)
+
+	move.l	varptr,a5
+
+	lea	RoundCounterPatches,a0	; hack, replace that logo patch 9 with patch to grab current round win counts
+	lea	kDefaultInternal,a1	; needed by LoadFredNoPatches
+	bsr	LoadFredNoPatches
+	lea	grabRoundWinsPatch(pc),a0	; patch to grab the current wins this round for Evil Reset detection
+	move.l	a0,trap6Vector
+
+	bsr	flushSerial
+
+	bsr	partInitSyncoVars
+	move.l	vEstabSyncMode,VBLVector
+
+	movem.l	(sp)+,a0-a6/d0-d7
+
+	move.w #$4,$fffff472	; P2 active
+	move.w #$1,$fffff46e	; P1 active
+	jmp	$3D26	; goto choose player screen
+
+
+
+; replacement trap 6
+; replaces the 1st logo patch. grabs the win count for each player at end of each game in a round.
+
+grabRoundWinsPatch
+	addq.l	#6,a7	; pop return addr and sr
+
+	movem.l	a5,-(sp)
+
+	move.l	varptr,a5
+
+	move.b	$ffffeea9,p1RoundWins(a5)	; grab current # wins this round
+	move.b	$ffffeeab,p2RoundWins(a5)
+
+	movem.l	(sp)+,a5
+
+	move.w	$ffffab88,d1	; do the instruction we blasted over
+	jmp	$646C	; and return right after the patchpoint
+
+
+
+; trap 1
+chooseFighterPatch
+	addq.l	#6,a7	; pop return addr and sr
+	move.l	#gameVBLAddr,VBLVector
+
+	jsr $3a56	; patched instruction
+	jsr $210a4	; dma up the background
+	jsr $5b28
+	move.w #$8c89,$c00004	; H 40 cell mode, enable shadow/hirite
+	move.b #$3,$ffffabb5
+
+	move.w	sr,-(sp)
+	move.w	#$2700,sr
+	movem.l	a0-a6/d0-d7,-(sp)
+
+	move.l	varptr,a5
+
+	move.w	#0,p1RoundWins(a5)	; zero round win counter, counts on p1 & p2 info being adjacent bytes
+
+	move.l	#0,$ffff8890	; reset VBL count
+
+	bsr	flushSerial
+
+	bsr	partInitSyncoVars
+	move.l	vEstabSyncMode,VBLVector
+
+	movem.l	(sp)+,a0-a6/d0-d7
+	move.w	(sp)+,sr
+
+	jmp	$34BA
+
+
+;
+; this only happens at the beginning of a round (not also after the first match)
+; since we know the boxes will be in sync here, we take this opportunity to reseed the random number generator.
+;
+
+; trap 2
+playBackgroundPatch
+	addq.l	#6,a7	; pop return addr and sr
+
+	move.l	#gameVBLAddr,VBLVector
+
+	jsr $975a	; clut, something important
+	jsr $4142	; set up for clut, BG DMA
+	jsr $6054	; ???
+	jsr $47ca	; ???
+	jsr $97cc	; bad
+	jsr $9936	; 
+	jsr $205c4
+	jsr $45c8
+	jsr $419a
+
+	move.w	sr,-(sp)
+	move.w	#$2700,sr
+	movem.l	a0/a5/d0-d3/d6,-(sp)
+
+	move.l	varptr,a5
+
+	move.l	randomSeed(a5),d0
+	rol.l	#1,d0	; this gives 32 synchronized random seeds
+	move.l	d0,randomSeed(a5)
+	move.l	d0,$ffffaa98	; reset the game's random # seed 
+
+	move.l	#0,$ffff8890	; reset VBL count
+
+	bsr	flushSerial
+
+	bsr	partInitSyncoVars
+	move.l	vEstabSyncMode,VBLVector
+
+	movem.l	(sp)+,a0/a5/d0-d3/d6
+	move.w	(sp)+,sr
+
+	jmp	$4076
+
+
+; trap 4
+dontResetScorePatch
+	addq.l	#6,a7	; either path wants this
+	moveq	#0,d0	; and this
+
+	movem.l	a0/a5/d0-d3/d6,-(sp)
+	move.l	varptr,a5
+
+	bsr	flushSerial	; the gameOverDMAPatch turned off our special VBL
+	bsr	partInitSyncoVars
+	move.l	vEstabSyncMode,VBLVector
+
+	cmpi.b	#0,gamesElapsed(a5)	; played any games?
+	movem.l	(sp)+,a0/a5/d0-d3/d6
+
+	beq.s	@resetScores
+
+	move.w	d0,$ffffeeac	; don't zero scores, but zero the other crap
+	jmp	$45A8
+
+@resetScores
+	jmp	$459c	; normal init
+
+
+; trap 3
+gamesElapsedPatch
+	addq.l	#6,a7
+
+	move.l	a5,-(sp)
+	move.l	varptr,a5
+	addi.b	#1,gamesElapsed(a5)
+	cmpi.b	#9,gamesElapsed(a5)	; played max number of games?
+	movea.l	(sp)+,a5
+
+	beq.s	@thatsAll
+
+	cmpi.b	#5,$ffffeea4	; P1 score = 5?
+	beq.s	@thatsAll
+	cmpi.b	#5,$ffffeea6	; P2 score = 5?
+	beq.s	@thatsAll
+
+	neg.w	$fff46e
+	move.w	#0,$fff470
+	neg.w	$fff472
+	move.w	#0,$fff474
+
+	jmp	$3D26	; back to choose player
+
+@thatsAll	; game over!
+
+returnToOS
+	move.w	#$2700,sr
+
+	movea.l	varptr,a5
+
+	bsr	updateResults	; update the stuff we give back to the OS
+
+	clr.l	gRamOffset	; Flip memory
+	clr.l	gRomOffset
+	move.l	#kDefaultInternal,gRegisterBase
+	move.l	#kDefaultControl,gControlRegisters
+
+	move.b	#kHereAssert,kKillHereSoft
+	move.b	#kHereAssert,kDefaultControl+kKillReg	; hack fixes bug that maybe exists
+
+	nop
+	lea	hereReturn(pc),a0
+	suba.l	#ExceptionRAMBase,a0
+	move.l	a0,-(sp)
+	jmp	magicAddr	; should trigger card exit
+
+hereReturn	; return here from transaddr
+	move.w	#$8006,$c00004	; disable horiz interrupts (and HV count) for OS bug
+
+	bsr	ClearHitEnables	; knock out all patchpoints
+
+	OSGameOver
+
+
+; trap 5
+gameOverDMAPatch
+	addq.l	#6,a7	; pop return addr and sr
+
+	move.l	#gameVBLAddr,VBLVector
+
+	jsr	$5440	; zero CRAM
+	jmp	$411A
+
+
+
+
+; trap 0 - only installed for single-player game
+singlePlayerGameOver
+	move.w	#$2700,sr
+	move.w	#$8006,$c00004	; disable horiz interrupts (and HV count) for OS bug
+
+	bsr	MapSingleOSMemory
+
+	bsr	ClearHitEnables	; knock out all patch points
+
+	move.w	#kSingleGameOver,-(sp)
+	OSHandleGameError	; this won't come back
+
+
+; ==========================================================================
+
+
+
+; --------------------------------------------------------------------------
+; Try to (Re)Install Psyq Vectors
+;
+; no regs modified
+
+InitPsyq
+	cmpi.l	#$2e303500,$3f2050
+	bne.s	@try202
+	move.l	#$3f15CC,$000028	; v2.05
+	bra.s	@flipper
+@try202	; it wasn't a 2.05, so try 2.02
+	cmpi.l	#$2e303200,$3f1ec2
+	bne.s	@do204
+	move.l	#$3f1476,$000028	; v2.02
+	bra.s	@flipper
+@do204	; wasnt a 2.02 either so must be a 2.04
+	cmpi.l	#$2e303400,$3f1ea2
+	bne.s	@noPsyQ
+	move.l	#$3f1456,$000028	; v2.04
+@flipper
+	move.b	#4,$3bfe03
+	dc.w	$a005
+@noPsyQ
+	rts
+
+
+
+; --------------------------------------------------------------------------
+; Update the stuff we pass back to the OS
+;
+; entry: a5 -> patch globals
+;
+
+updateResults:
+	movea.l	myGameParams,a0
+
+	move.l	gameFrames(a5),GameParams.playTime(a0)	; game length, in frames
+
+	moveq	#0,d0
+	move.b	$ffffeea4,d0	; grab P1 score
+	swap	d0
+	move.b	$ffffeea6,d0	; grab P2 score
+
+	tst.b	isLeader(a5)	; who is number 1?
+	bne.s	@IAmMaster
+	; local is SLAVE (P2)
+	move.w	d0,GameParams.localPlayer1Result+2(a0)
+	swap	d0
+	move.w	d0,GameParams.remotePlayer1Result+2(a0)
+
+	bra.s	@checkError
+
+@IAmMaster	; local is MASTER (P1)
+	move.w	d0,GameParams.remotePlayer1Result+2(a0)
+	swap	d0
+	move.w	d0,GameParams.localPlayer1Result+2(a0)
+
+@checkError
+	moveq	#0,d0
+	move.w	errorType(a5),d0
+	ext.l	d0
+	move.l	d0,GameParams.gameError(a0)
+	bne.s	@haveAnError
+
+	move.w	d0,GameParams.localGameError(a0)	; this gets set by gameLoopError
+
+@haveAnError
+	rts
+
+
+; --------------------------------------------------------------------------
+; unexpected exceptions come here
+
+miscException
+	move.l	varptr(pc),a5
+	lea	errorFrame(a5),a0
+	move.l	sp,d0
+	andi.l	#$00FF0000,d0
+	cmpi.l	#$00FF0000,d0
+	bne.s	@badSP
+
+	move.w	(sp)+,(a0)+	; sr
+	move.l	(sp)+,(a0)+	; pc
+	bra.s	@exceptExit
+
+@badSP
+	move.w	#'BS',(a0)+
+	move.l	sp,(a0)+
+
+@exceptExit
+	move.l	#exceptError,-(sp)
+	bra.s	reportError
+
+
+; --------------------------------------------------------------------------
+; all fatal errors funnel through here
+;
+; Fatal Errors are:	- Spread Error
+;	- Error Recovery Timeout
+;	- Unexpected Exception
+; 
+
+spinDeath:
+	move.w	#'SD',-(sp)
+
+reportError:
+	move.l	varptr(pc),a5
+	move.w	(sp)+,errorType(a5)	; stash the error type
+
+	if FORSERVER then
+	bra	returnToOS	; ENABLE FOR SERVER BUILDS
+	else
+wedge
+	DEBUGGER
+	endif
+
+
+; --------------------------------------------------------------------------
+; turns off all sound generation. To turn sound back on, do a Release_Z80_BusReq,
+;
+
+turnOffSound
+	Assert_Z80_BusReq
+	Wait_Z80_BusAck d0
+	KeyUpAll6FMVoices d0
+	Turn_Off_PSG a0
+	rts
+
+
+
+; --------------------------------------------------------------------------
+; reportResults sets up everything to return to the server either
+;	upon termination or when going into HangleGameError.
+;	input:	d0.w has error to pass back to OS
+;	output:	d0.l (unchanged), a0.l = myGameParams pointer
+;	uses:	d1.l,a1.l
+
+reportResults
+	move.l	myGameParams(pc),a0
+	ext.l	d0
+	move.l	d0,GameParams.gameError(a0)	; game Error to report
+
+	rts
+
+
+
+; -----------------------------------------
+; input:	d1 = syncocompletion offset (for full init)
+;	a5 -> patch vars
+;
+; if gameHoldOff
+
+fullInitSyncoVars:	; init all, only at startup
+	move.l	#(lastVar-StinkoVarsStart)-1,d0
+	bra.s	commonInitSyncoVars
+
+partInitSyncoVars:
+	moveq	#0,d1	; zero offset
+	move.l	#(preservedSyncoVars-StinkoVarsStart)-1,d0	; init non-preserved vars
+
+
+commonInitSyncoVars:
+	lea	StinkoVarsStart(a5),a0
+
+zeroSyncoLoop:
+	move.b	#0,(a0)+
+	dbra	d0,zeroSyncoLoop
+
+	move.w	#$8C00+int,interlaceOn(a5)	; interlace on code for register #12
+	move.w	#$8C00+nonInt,interlaceOff(a5)	; interlace off code for register #12
+	move.l	#$8C838C81,int_NonInt(a5)	; set up int_nonInt for syncotron
+
+	move.b	#$FF,holdOffByte(a5)	; send something innocuous
+
+	moveq	#0,d0
+
+	lea	setupDebugFlags(pc),a2	; setup syncOTron completion routine
+	adda.l	d1,a2
+	move.l	a2,syncOCompletion(a5)
+
+	sf	rxHoldOff(a5)	; enable during syncup (set afterwards)
+
+	tst.b	gameHoldOff(a5)	; if <>0, we're doing a resync
+	bne.s	@dontInitDelayFifo
+
+	move.w	#0,readDelayPtr(a5)
+	lea	readDelayFifo(a5),a0
+	move.l	#readDelayFifoSize,d0
+	subq.w	#1,d0
+@initDelayFifo
+	move.w	#$ffff,(a0)+
+	dbra	d0,@initDelayFifo
+
+@dontInitDelayFifo
+	rts
+
+
+
+;===========================================================================
+; Vbl Synchronization (SyncOTron)
+; Vbls are synchronized each time vbl interrupts are enabled (except in local mode
+; when vbl interrupts free run)
+
+; Syncotron matches Vbls within syncJitter tolerance. This constraint is actually
+;	unnecessary for reliable operation, but it is a simplification during development.
+;	eventually, we could eliminate it for faster average sync-up time (albeit same
+;	worst-case).
+;
+; Sync is maintained during runMode to withih 2 x SyncJitter tolerance.
+;
+; The current protocol works as follows:
+;
+; EstablishSyncMode:
+;
+;	Initially establishes a connection between both machines. Uses GTEstablishSynch. Goes
+;	to SyncMasterMode if Master, to SyncSlaveMode if Slave. Note that throughout EstablishSyncMode
+;	and SyncMasterMode/SyncSlaveMode control is never returned to the mainline code. Vbls
+; during these modes are either ignored or handled by slewMode. The mainline wakes up again
+;	in RunMode.
+;
+; SyncMasterMode:
+;
+;	Master side SyncOTron.
+;
+;	1. The master sends a echoByte to the slave. It waits for a reply, sampling every
+;	VCnt. The second byte of the echoByte is used to send syncOTxByte to the slave.
+;
+;	2. Upon receiving an echo from the slave followed by the VCnt of the master's echo
+;	arriving to the slave, the master counts the number of VCnts that have elapsed
+;	(to compute the latency) and determines whether it would be faster for itself or the slave to
+;	switch to interlace mode for their respective Vbls to slew together. It also
+;	computes how many Vbls it will take for them to be slewed together. It sends a
+;	message to the slave to that effect, placing one of them in interlace mode, and
+;	the other in non-int. They both then count the number Vbls as they slew into sync.
+;
+;	3. The master waits for an echo from the slave to be certain that the slave is listening
+;	when it sends the timing-critical syncLock. The echo is followed by syncORxByte.
+;
+;	4. The master sends a syncLock to the slave. It then waits latency frames for the slave to
+;	receive the data. If the refVCnt is within deferEarly of Vbl the master waits an extra
+;	frame. The master then goes into RunMode, jsr's to the SyncOCompletion routine, and 
+;	RTE's to the mainline code.
+;
+;
+;	Slave side SyncOTron
+;
+;	1. The slave waits for an echoByte, sampling every VCnt. The second byte is syncORxByte.
+;	The slave responds with an echoByte followed by the VCnt at which the master's echoByte
+;	arrived.
+;
+;	2. The slave waits for a intMessage that says whether to go into interlaced or non-int
+;	mode and the number of frames to slew fors.
+;
+;	3. After slewing the slave sends an echoByte to the master. The second byte is syncOTxByte.
+;
+;	4. The slave waits for a syncLock. The syncLock is followed by a refVCnt. If the refVCnt
+;	falls within deferEarly of Vbl, and the current VCnt is in the second half of the frame
+;	(i.e. it is not early in the frame), the slave waits an additional frame. The slave then
+;	goes into runMode, jsr's to the SyncOCompletion routine, and RTE's to the mainline code.
+; 
+; RunMode (-1):
+; rx Data
+; compare arrival VCnt to refTimeStamp
+;	call syncOTron to determine if going into interlace mode will seek toward refTimeStamp
+;
+; if rxdata is not noData
+;	put into rxFifo
+;
+; if rxFifo is empty
+;	send noData
+;	skip this vbl
+; else
+;	if syncFlag is zero (i.e. the game loop completed by vbl)
+;	read controllers
+;	tx read data
+;	set syncFlag
+;	do the Vbl
+;	else
+;	send noData
+;	skip this vbl
+;
+;===========================================================================
+
+
+;
+; VV VV BBBBBBB LL 
+; VV VV BB BB LL
+; VV VV BB BB LL
+; VV VV BBBBBBB LL	 
+; VV VV BB BB LL
+; VV VV BB BB LL
+; V BBBBBBB LLLLLLLL
+;
+; -----------------------------
+; R O U T I N E S
+; -----------------------------
+;
+
+GameTalkPatchVBL:
+	addq.l	#1,gTicks
+
+	movem.l	d0-d2/a0-a2,-(sp)
+
+	move.l	gTicks,d1
+	move.l	d1,d0
+	rol.w	#1,d0
+	eor.b	d1,d0
+	move.b	d0,kDefaultInternal+kLEDData
+
+	move.l	mySession(pc),-(a7)	; push session
+	OSGTSession_ReadHardwareModem	; Err	OSGTSession_ReadHardwareModem ( GTSession * session )
+	addq.w	#4,a7
+
+	movem.l	(sp)+,d0-d2/a0-a2
+	rte
+
+
+
+gameLoopError1
+
+gameLoopError2
+
+gameLoopError3
+
+gameLoopError4
+
+gameLoopError5
+
+gameLoopError6
+
+gameLoopError
+	NON_INTERLACE_MODE	; don't drift out of sync!
+	move.l	myGameParams(pc),a0
+	move.w	d6,GameParams.localGameError(a0)
+
+	st	gameHoldOff(a5)	; set gameHoldOff flag to prevent readDelayFifo erasure
+	bsr	partInitSyncoVars
+	move.l	vEstabSyncMode,VBLVector
+
+	move.l	gameFrames(a5),d2	; remember frame I'm on
+	and.b	#$3f,d2	; kill msbs (6 bits max)
+	move.b	d2,syncOTxByte(a5)	; we'll send this as we re-establish sync.
+	; the other guy will stash it in syncORxByte.
+	lea	frameResync(pc),a0
+	move.l	a0,syncOCompletion(a5)	; do an error recovery
+
+	move.b	#noData,holdOffByte(a5)	; read noData during rxHoldOff so no gameFrames advance
+
+	bsr	flushserial
+
+	subq.l	#1,$ffff8890	; descrement the game's VBL
+
+	movem.l	(sp)+,d0-d7/a0-a6	; skip this VBL
+	rte
+
+
+
+
+runModeVBL
+	movem.l	d0-d7/a0-a6,-(sp)
+
+	addq.l	#1,gTicks
+	move.l	varptr,a5
+
+	move.l	gTicks,d0
+	lsr.w	#2,d0
+	move.b	d0,kDefaultInternal+kLEDData
+
+
+	; --- Latency/Resync VBL skip checks --- 
+
+	tst.b	rxHoldOff(a5)	; rxHoldOff is the latency delay after entering runMode
+	beq.s	@dontDecrementRxHoldOff
+	subq.b	#1,rxHoldOff(a5)	; while rxHoldOff <> 0, rxThreeBytes returns noData
+
+
+@dontDecrementRxHoldOff	; FOR A RESYNC:
+	tst.b	gameHoldOff(a5)	; if we're ahead, gameHoldOff = frame delta * 2.
+	beq.s	@noGameHoldOff	; if we're behind, gameHolfOff = 0.
+
+
+	; the game won't run this VBL, we're waiting on the other guy (or latency)
+@stillFrameOffset
+	bsr	rxThreeBytes	; try to get 2 data bytes in d0 & d1 & a timestamp in d2
+	bmi.s	gameLoopError1	; data should not be late
+	tst.w	d6
+	bne.s	gameLoopError2	; error
+
+	; the lagger should only get here during the latency
+	; rxHoldoff. rxThreeBytes should always return noData then.
+
+	cmp.b	#noData,d1	; rxThreeBytes returns noData if we're in rxHoldOff
+	beq.s	@noFrameIncrement
+
+	subq.b	#2,gameHoldOff(a5)	; this should only execute if we're the leader & not in rxHoldOff
+	bpl.s	@notFucked
+	move.b	#0,gameHoldOff(a5)	; try to fix up (scary! - should NEVER happen)
+@notFucked
+
+@noFrameIncrement
+	move.b	frameOffset(a5),d2	; see if still data to send
+	beq.s	@noFrameOffset
+	bsr	getOldReadData	; fetch old read data in d0.w (already fixed up for txThreeBytes)
+	subq.b	#2,d2	; decrement frameOffset (it is a word ptr)
+	move.b	d2,frameOffset(a5)	; update frameOffset
+	bsr	txThreeBytes	; transmit d0.w (straightdata)
+
+@noFrameOffset
+	movem.l	(sp)+,d0-d7/a0-a6	; skip this VBL
+	rte
+
+
+
+@noGameHoldOff	; are we catching up in resync mode?
+	tst.b	frameOffset(a5)	; if we're catching up, frameOffset = latency frames (*2)
+	bne.s	@stillFrameOffset	; do we still have some of those latency frames to skip?
+
+
+
+	; --- Normal, Non-skipped VBL --- 
+
+	bsr	rxThreeBytes	; receive & de-munge 12 bits --> 2 bytes (d0.b & d1.b)
+	bmi.s	dataLate
+	tst.w	d6
+	bne	gameLoopError3	; we're hosed. attempt to resync
+
+	move.b	refTimeStamp(a5),d5
+
+	bsr	syncOTron	; adjust sync if necessary
+
+handleRxData
+	cmp.b	#noData,d1	; see if it's a noData
+	beq.s	noRxData
+
+normData
+	bsr	putRxFifo	; put d0 and d1 (de-munged received data) into rxFifo
+	bpl.s	okayByte
+	bra	gameLoopError4	; rxFifoOverflow
+
+noRxData
+	move.w	rxFifoTail(a5),d0
+	cmp.w	rxFifoHead(a5),d0
+	beq	rxFifoEmpty	; if empty, skip this Vbl
+okayByte
+	sf	prevFifoEmpty(a5)
+	bra.s	doThisVbl	; yes, do the Vbl
+
+
+dataLate
+	INTERLACE_MODE	; go interlaced to make us later next frame
+	addq.l	#1,lateCount(a5)	; inc late frame counter
+tryAgain
+	bsr	shortTimedRxByte	; wait a little bit for a byte
+	bmi.s	lostSync
+	tst.w	d6
+	bne	gameLoopError5	; we're hosed. attempt to resync
+
+	addq.l	#1,caughtLateCount(a5)
+	bra.s	handleRxData
+lostSync
+	addq.l	#1,lostSyncCount(a5)
+
+totallyLostSync
+	move.w	#lostSyncErr,d6
+	bra	gameLoopError6	; we're hosed. attempt to resync
+
+
+
+doThisVbl
+	bsr	tentReadControllers	; read the local controller(s) tentatively into d0.w
+
+	move.l	gameFrames(a5),d2	; bump count of non-skipped Vbl's
+	addq.l	#1,d2
+	move.l	d2,gameFrames(a5)
+
+	bsr	txThreeBytes	; munge 2 bytes (d0.w) and xmit them
+
+
+@Player1
+	moveq	#0,d0
+	move.w	ctrl1Hold(a5),d0	; P1 is both bytes of ctrl1Hold
+	bmi.s	@threeButton1	; it's 3-button
+
+	ori.l	#$80008F00,d0	; d0.l = 1000 0000 0000 0000 1XYZ 1111 SACB RLDU
+	bra.s	@Player2
+
+@threeButton1
+	ori.w	#$FF00,d0	; d0.l = 0000 0000 0000 0000 1111 1111 SACB RLDU
+
+@Player2
+	move.l	d0,gameController1
+	moveq	#0,d0
+	move.w	ctrl3Hold(a5),d0	; P2 is both bytes of ctrl3Hold
+	bmi.s	@threeButton2	; it's 3-button
+
+	ori.l	#$80008F00,d0	; d0.l = 1000 0000 0000 0000 1XYZ 1111 SACB RLDU
+	bra.s	@endCtlrDecode
+
+@threeButton2
+	ori.w	#$FF00,d0	; d0.l = 0000 0000 0000 0000 1111 1111 SACB RLDU
+
+@endCtlrDecode
+	move.l	d0,gameController2
+
+	movem.l	(sp)+,d0-d7/a0-a6
+
+justNormalVBL	; the addq comes before the readcontroller call
+	addq.l	#1,$ffff8890	; bump vbl count
+	jmp	gameVBLPostReadCtrls	; jump into game VBL after readcontrols
+
+
+
+
+rxFifoEmpty
+	addq.l	#1,rxFifoEmptyCount(a5)
+
+	move.w	#noData,d0	; send noData in low byte (receiver checks low byte, d1)
+	bsr	txThreeBytes
+
+endRunMode
+	movem.l	(sp)+,d0-d7/a0-a6
+	rte
+
+
+
+
+
+
+; gets bytes from readDelayFifo offset by frameOffset
+; input:	d2.b = (positive) frameOffset as a word pointer
+; output:	d0.w = data, d2.b = preserved frameOffset
+; uses a3.b,d1.w
+
+getOldReadData
+	lea	readDelayFifo(a5),a3	; a3 -> fifo
+	move.b	d2,d0	; copy frameOffset
+	move.w	readDelayPtr(a5),d1	; d1 -> current fifo entry
+	sub.b	d0,d1	; point back into the past (MSB is zero)
+	bpl.s	@notNeg
+	add.b	#readDelayFifoSize*2,d1	; wrap (.b okay)
+@notNeg
+	move.w	0(a3,d1.w),d0	; snarf previous read
+	move.w	d0,d1
+	lsr.w	#4,d0
+	move.b	d1,d0	; scrunch for txThreeBytes
+	rts
+
+
+; syncOTron completion routine to resync frames
+;
+; called from gotoRunMode, after units have been sync'ed, in response to a gameLoopError
+;
+; uses d0.b, d1.b, d2.b, d3.l, a0
+
+frameResync
+	moveq	#$7f,d3	; saves a word (and.b #$7f,dx used twice)
+
+	move.l	myGameParams(pc),a2
+	addq.w	#1,GameParams.errorRecovers(a2)	; bump err recovers
+
+	clr.b	gameHoldOff(a5)	; gameHoldOff == 0 --> no longer doing a resync
+
+	move.b	latencyCount(a5),d2	; copy latencyCount for frameOffset
+	add.b	d2,d2	; make word pointer
+
+	move.b	gameFrames+3(a5),d1	; get my current frame
+	andi.b	#$3f,d1	; limit it like we did for the remote one
+	add.b	d1,d1	; *2
+
+	move.b	syncoRxByte(a5),d0	; get other's current frame (rec'vd in syncMaster/syncSlave)
+	add.b	d0,d0	; *2
+
+	cmp.b	#maxFrameSpread*2+2,d0	; see if near wrap bottom
+	bls.s	@recenter
+
+	cmp.b	#$80-(maxFrameSpread*2+2),d0	; see if near wrap top
+	bls.s	@centeredValues
+
+@recenter
+	add.b	#$40,d0	; recenter other's frame
+	and.b	d3,d0	; kill other's msb
+	add.b	#$40,d1	; recenter my frame
+
+@centeredValues
+	move.b	#0,gameHoldOff(a5)	; init this
+	and.b	d3,d1	; kill my msb
+	sub.b	d1,d0	; (his frame*2) - (my frame*2)
+	bpl.s	@noGameHoldOff	; b if (his frame >= my frame)
+
+	; we are AHEAD, so we need to wait for the other guy
+	neg.b	d0	; make it a positive frame difference
+	add.b	d0,d2	; add to frame offset (double okay for word ptr)
+	move.b	d0,gameHoldOff(a5)	; hold off doVbl for gameHoldOff/2 frames to resync
+
+@noGameHoldOff
+	cmp.b	#maxFrameSpread*2,d0	; see if too far apart to resync (frame delta too great)
+	bhi.s	@spreadError
+	move.b	d2,frameOffset(a5)	; setup frameOffset
+
+	lea	@nullCompletion(pc),a0
+	move.l	a0,syncOCompletion(a5)	; nullify syncOCompletion
+@nullCompletion
+	rts
+
+@spreadError
+	move.w	#spreadError,-(sp)
+	bra	reportError
+
+
+
+
+; decrement slew counter
+; no registers affected
+
+slewModeVBL:
+	move.l	a5,-(sp)
+	addq.l	#1,gTicks
+	move.l	varptr,a5
+	subq.w	#1,slewCount(a5)
+	move.l	(sp)+,a5
+	rte
+
+
+
+; keeps trying to read a syncLock message. Waits a deferral frame if necessary
+; loads latencyCount and refVbl when done. Sets latencyCount to $ff if error.
+
+syncLockModeVBL:
+	movem.l	d0-d7/a0-a6,-(sp)
+	addq.l	#1,gTicks
+	move.l	varptr,a5
+
+	clr.b	d4	; flag no deferral
+	move.b	deferFlag(a5),d0
+	bmi.s	@notNearVbl	; = $ff if no deferral possible
+	bne.s	@deferDone	; = latencyCount if just deferred a frame
+
+@delayRead		; = $00 if deferral
+	move.b	#deferLateVCnt+syncJitter,d4	; make sure we sample well after data should arrive
+	bsr	waitTillVCnt		; at exit d4 is non-zero to flag to defer next frame
+
+@notNearVbl
+	bsr	rxThreeBytes
+	bmi.s	@noData
+	tst.w	d6
+	bne.s	@error
+
+	move.b	d0,d3	; make a copy
+	and.b	#syncMask,d3
+	cmp.b	#syncLock,d3	; was this a synclock message?
+	bne.s	@error
+
+	btst	#3,d0	; see if VCnt b6 flag is set
+	beq.s	@lowVCnt
+	or.b	#$40,d1	; set VCnt b6
+
+@lowVCnt
+	move.b	d1,refTimeStamp(a5)	; stash refTimeStamp
+	and.b	#latencyMask,d0	; isolate latency (b2-b0)
+	tst.b	d4	; see if deferral
+	bne.s	@deferOneFrame
+
+@deferDone
+	move.b	d0,latencyCount(a5)
+	bra.s	@endSyncLockWait
+
+@deferOneFrame
+	move.b	d0,deferFlag(a5)	; hold latencyCount and defer one frame
+	bra.s	@endSyncLockWait
+
+@noData
+	subq.w	#1,slewCount(a5)	; count down to see if maxLatency exceeded
+	bne.s	@endSyncLockWait
+
+@error
+	st	latencyCount(a5)	; set error flag
+
+@endSyncLockWait
+	movem.l	(sp)+,d0-d7/a0-a6
+	rte
+
+
+; --------------------------------------------------------------------------
+; do error recovery.
+;	Call CheckLine. If line is clear, establish sync again else pass error into HandleGameError
+;	Internal errors go right into HandleGameError as fatal.
+;
+; entry: a5 -> patch vars
+
+errorRecover
+	bsr	updateResults	; update results in case we don't come back
+
+	move.l	GTVBLVector,VBLVector	; let the GT VBL run
+	move	#$2500,sr	; enable vbls
+
+	bsr	MapSingleOSMemory	; flip memory
+	bsr	AdjustOffsetsForOS	; adjust OS offsets, VBL ptr
+
+	OSCheckLine	; OSErr	OSCheckLine ( void )
+
+	move.l	gGameParams,a0	; a0 -> GameParams
+
+	tst.w	d0	; see if noise
+	beq.s	@lineClear
+
+@lineNoise
+	move.w	d0,-(sp)	; push err for HandleGameError
+
+	cmp.w	#kCallWaitingErr,d0
+	beq.s	@CallWaiting
+
+	cmp.w	#kRemoteCallWaitingErr,d0
+	bne.s	@notCallWaiting
+
+@CallWaiting
+	addq.b	#1,callWaitingCount(a5)	; count Call Waiting events
+
+@notCallWaiting
+	move.w	#$8006,$c00004	; disable horiz interrupts (and HV count) for OS bug
+
+	bsr	ClearHitEnables	; knock out all patch points
+
+	OSHandleGameError	; OSErr HandleGameError( err );
+	addq.w	#2,sp	; we may or may not come back
+
+	bsr	RestoreHitEnables	; turn patchpoints back as they were
+
+@lineClear
+	bsr	MapMemForGame	; flip memory
+	bsr	AdjustOffsetsForGame	; adjust OS offsets, VBL addr
+
+	;	move.w	horizEna\Var\,$c00004	; re-enable horiz interrupts if needed
+
+	move.l	gTicks,d0
+	cmp.l	errRecoverTime(a5),d0
+	bmi.s	@notTimedOut
+
+	move.w	#kGameTimeoutError,-(sp)	; give up
+	bra	reportError
+
+@notTimedOut
+	bra.s	retryEstablishSync	; try again
+
+
+
+
+;
+; Establish Sync Operation
+;
+;	Master	Slave
+;
+;	Send EchoByte
+;	Send syncOTxByte
+;	Wait For Slave Echo
+;	Wait for EchoByte Message, stash
+;	received byte as syncORxByte
+;	Send EchoByte
+;	Send VCnt of received data
+;	Wait for Int/NonInt msg
+;	Wait for EchoByte msg
+;	Send SlewCnt + Int bit
+;	Wait for slew
+;	Wait for Slave Echo
+;	Goto int/nonint mode, appropriately
+;	Wait for slew
+;	Send EchoByte
+;	Send SyncOTxByte
+;	Wait for SyncLock
+;	Grab SyncORxByte
+;	Wait till readVCnt
+;	Send SyncLock + latencyCnt
+;	Send RefTimeStamp
+;
+;
+;	SYNCED!
+;
+
+
+establishSyncModeVBL:	; establish initial sync
+	movem.l	d0-d7/a0-a6,-(sp)
+	addq.l	#1,gTicks
+
+	;	bsr	turnOffSound	; no glitches during sync -- LEAVE OUT FOR NOW!
+
+	move.l	varptr,a5
+
+	st	inResync(a5)	; indicate that we are IN resync
+
+	move.l	gTicks,d0	; init timeout
+	add.l	#3000,d0
+	move.l	d0,errRecoverTime(a5)
+
+	bra	errorRecover	; give CheckLine a chance to look for the Call Waiting beep
+	; and install the GT VBL & turn on interrupts
+
+retryEstablishSync:
+	move.w	#maxLatency,d5	; wait for any data in transit
+	move.b	#readVCnt,d4
+@nextFrame
+	bsr	waitTillVCnt	; wait till readVCnt
+	dbra	d5,@nextFrame
+	bsr	flushserial
+
+	move.l	#7*60,-(sp)	; wait 7 seconds
+	move.l	mysession,-(sp)
+	OSGTSession_EstablishSynch	; Err	OSGTSession_EstablishSynch ( GTSession * session, long timeout )
+	addq.l	#8,sp
+
+	move.w	#$2700,sr	; turn off interrupts
+
+	tst.l	d0	; see if we were able to re-establish sync
+	bne	errorRecover
+
+@noErr
+	move.w	#maxLatency,d5	; wait for any data in transit
+	move.b	#readVCnt,d4
+@nextFrame1
+	bsr	waitTillVCnt	; wait till readVCnt
+	dbra	d5,@nextFrame1
+	bsr	flushserial
+
+	st	straightData(a5)	; don't encode data during syncotron
+
+	tst.b	isLeader(a5)
+	beq	syncSlave
+
+
+; --------------------------------------------------------------------------
+syncMaster
+	move.b	#readVCnt,d4
+	bsr	waitTillVCnt	; wait till readVCnt
+
+	move.b	#echoByte,d0
+	move.b	syncOTxByte(a5),d1	; send syncOTxByte 
+	bsr	txNoHoldOff	; send echo to slave
+
+	bsr	waitForSlaveEcho
+	bmi	masterSyncError1
+
+	move.b	d4,d0	; hold latency
+
+	swap	d4	; use computed master VCnt
+	move.b	d4,refTimeStamp(a5)	; stash as refTimeStamp (offset by ReadVCnt)
+	sf	d7	; clear defer flag
+	cmp.b	#deferLateVCnt,d4	; see if deferLate
+	ble.s	@setDeferFlag	; set defer flag
+	cmp.b	#deferEarlyVCnt,d4	; see if deferEarly
+	blt.s	@noDeferEarly
+	addq.b	#1,d0	; deferral: add 1 to the latency
+
+@setDeferFlag
+	move.b	#$10,d7	; set defer flag 000x0000
+
+@noDeferEarly
+	move.b	d0,latencyCount(a5)	; stash latency
+
+	move.b	d1,d5	; "seek" to slave VCnt
+	move.b	d4,d2
+	bsr	SyncOTron	; determine int/non-int and slew
+
+	cmp.b	#$30,d2	; see if more than half-way
+	blt.s	@lessThanHalfWay
+
+	neg.b	d2
+	add.b	#kMaxVCnt,d2	; compute distance to kmaxVCnt
+
+@lessThanHalfWay
+	lsl.w	#8,d2	; move to msb of lsw (8.8 fixed point)
+	mulu	#halfLinesPerVCnt,d2	; number of frames of slew needed
+	swap	d2	; put result in lsw
+	move.w	d2,slewCount(a5)
+	move.w	d2,slewHold(a5)
+
+	swap	d3	; give slave opposite int or non_int
+	and.b	#2,d3	; kill all but intNonInt bit: 000000x0
+	add.b	d3,d3
+	add.b	d3,d3	; 0000x000
+
+	move.b	d2,d0	; grab slewCount lsbs
+	and.b	#$7,d0	; 00000xxx
+	or.b	d3,d0	; 0000xxxx
+	or.b	d7,d0	; 000xxxxx OR in deferFlag
+
+	move.w	d2,d1	; 0000000x xxxxxxxx
+	lsr.w	#3,d1	; 00000000 00xxxxxx
+
+	bsr	txNoHoldOff	; send off message to slave
+
+	bsr	waitForSlew	; wait for Segas to slew together
+
+	NON_INTERLACE_MODE	; switch to normal
+
+	bsr	waitForSlaveEcho	; wait till slave echos (so we're sure it's ready)
+	bmi.s	masterSyncError2
+
+	move.b	d1,syncORxByte(a5)	; grab syncOTron rxByte
+
+	move.l	vSlewMode,VBLVector	; slew mode (### Not necessary)
+	move.w	#$2500,sr	; enable vbls...this harmlessly discharges any pending Vbls
+
+	move.b	#readVCnt,d4
+	bsr	waitTillVCnt	; wait till readVCnt
+
+	clr.w	d0
+	move.b	latencyCount(a5),d0
+	move.w	d0,slewCount(a5)	; set up for slew: wait for slave latency frames
+
+	or.b	#syncLock,d0	; synclock is $10, latency is in b2-b0
+	move.b	refTimeStamp(a5),d1	; put refTimeStamp in second byte
+	btst	#6,d1	; see if b6 set
+	beq.s	@lowVCnt
+	or.b	#$08,d0	; set b3 of d0 to indicate hi VCnt to receiver
+	and.b	#$3f,d1	; kill b6 & b7 in d1
+
+@lowVCnt
+	bsr	txNoHoldOff	; send syncLock to slave
+
+	bsr	waitForSlew	; wait for slave to get syncLock
+
+	bra	gotoRunMode	; we are synced
+
+
+masterSyncError1
+
+masterSyncError2
+
+slaveSyncError1
+
+slaveSyncError2
+
+slaveSyncError3
+
+syncOTronError
+	bra	errorRecover	; will either recover or bail
+
+; --------------------------------------------------------------------------
+syncSlave	; non-interrupt time syncotron for slave
+	move.l	#echoByte*$10000+$FFFF,d4
+	bsr	waitForMessage
+	bmi.s	slaveSyncError1
+
+	move.b	d1,syncORxByte(a5)	; stash syncORxByte
+
+	move.b	d2,d1	; send back received VCnt
+	and.w	#$3f,d1
+	btst	#6,d2	; see if b6 of VCnt set
+	beq.s	@lowVCnt
+	or.b	#1,d0	; flag in d0 bit 0
+
+@lowVCnt
+	bsr	txNoHoldOff	; send echo back to master (d0 still has echoByte)
+
+	clr.l	d4	; no mask for intMessage
+	bsr	waitForMessage	; wait for intMessage
+	bmi.s	slaveSyncError2
+
+	NON_INTERLACE_MODE
+	btst	#3,d0	; see if int bit is on
+	beq.s	@nonInt
+	INTERLACE_MODE
+
+@nonInt
+	btst	#4,d0	; see if deferral is flagged is on
+	seq	deferFlag(a5)	; $ff if no deferral, $00 if deferral
+	sf	slewCount(a5)
+	and.b	#7,d0	; isolate slew lsbs: 00000xxx
+	and.w	#$3f,d1	; isolate slew msbs: 00000000 00xxxxxx
+	lsl.w	#3,d1	; 0000000x xxxxx000
+	or.b	d0,d1	; 0000000x xxxxxxxx
+	move.w	d1,slewCount(a5)	; store
+	move.w	d1,slewHold(a5)
+
+	bsr	waitForSlew	; wait for Segas to slew together
+
+	NON_INTERLACE_MODE	; switch to normal
+
+	move.b	#readVCnt,d4
+	bsr.s	waitTillVCnt	; wait till readVCnt
+
+	move.b	#echoByte,d0
+	move.b	syncOTxByte(a5),d1	; send syncOTxByte
+	bsr	txNoHoldOff	; send echo to master
+
+	bsr	waitForSyncLock	; wait for syncLock
+	bmi	slaveSyncError3
+	; all is ok - fall into gotoRunMode
+
+; --------------------------------------------------------------------------
+; (Re)enter normal running mode.
+;
+
+gotoRunMode
+	sf	straightData(a5)	; encode data during game play
+	move.b	refTimeStamp(a5),d0
+	addq.b	#syncOTronMargin,d0	; back off by a bit to allow margin
+	cmp.b	#kMaxVCnt,d0	; see if wraps
+	bls.s	@noWrap
+	sub.b	#kMaxVCnt,d0	; wrap it
+
+@noWrap
+	move.b	d0,refTimeStamp(a5)
+	move.b	latencyCount(a5),rxHoldOff(a5)	; hold off VBL rx till latencyCount elapses
+	addq.b	#1,rxHoldOff(a5)	; bias because dec'd before 1st tx in runMode loop
+
+	;	Release_Z80_BusReq	; let the Z80 run - LEAVE OUT FOR NOW!
+
+	move.l	vRunMode,VBLVector	; we are synced: normal vbl from here on
+
+	sf	inResync(a5)	; indicate that we are OUT OF resync
+
+	move.l	syncOCompletion(a5),a0	; jsr to completion routine
+	jsr	(a0)
+
+	movem.l	(sp)+,d0-d7/a0-a6
+	rte
+
+
+; --------------------------------------------------------------------------
+; waits until VCnt clocks to the next successive value. 
+; most of this routine is about getting a reliable VCnt read
+; input:	d0.b: $ff if unknown current VCnt, current VCnt if known
+; output:	d0.b is the new current VCnt
+; uses:	d2.b
+
+waitTillNextVCnt
+	move.b	d0,d2	; init last VCnt
+
+@getReadVcntAgain
+	move.b	kDefaultInternal+kReadMVSyncHigh+1,d0	; grab VCnt
+	cmp.b	kDefaultInternal+kReadMVSyncHigh+1,d0	; validate counter value
+	bne.s	@getReadVcntAgain
+
+	cmp.b	#kMaxVCnt,d0	; see if missed a Vbl
+	bls.s	@inRange
+	sub.b	#kMaxVCnt,d0	; normalize it
+
+@inRange
+	tst.b	d2	; see if last Vcnt still invalid
+	bpl.s	@validLastVcnt	; hope 1st read is valid!
+	move.b	d0,d2	; use current value as reference
+	bra.s	@getReadVcntAgain	; try again
+
+@validLastVcnt
+	cmp.b	d0,d2
+	beq.s	@getReadVcntAgain	; same value as before: try again
+	rts
+
+; --------------------------------------------------------------------------
+; waits until start of inputted VCnt period.
+; input:	d4 is VCnt period to wait for
+; uses d2.b, d0.b
+
+waitTillVCnt
+	st	d0	; flag unknown starting value
+
+@keepWaiting
+	bsr.s	waitTillNextVCnt
+	cmp.b	d0,d4	; see if we've reached readVCnt
+	bne.s	@keepWaiting
+	rts
+
+
+; --------------------------------------------------------------------------
+; waits for return of echo from slave
+; returns N set if wait is > 2*maxLatency or comm error, d0 = echoTimeOutError
+; else returns N clear.
+; output:	d4.l is VCnts:Frames of latency
+;	d1.b is slave's VCnt upon receipt of echo
+;	d2.b is our VCnt upon receipt of echo
+; uses d0,d1,d2,d3,d4,d5,d6,d7,a0,a4. Assumes a5 has been set up
+
+
+waitForSlaveEcho
+	move.w	#waitForEchoTimeOut,d5
+	move.w	d5,d4	; hold a copy
+
+	st	d0
+	move.b	d0,vHold(a5)	; hold vCnt
+
+@tryAgain
+	bsr.s	waitTillNextVCnt	; check once a VCnt
+
+	; this code verifies VCnt during latency count
+	; maybe not necessary
+
+	move.b	vHold(a5),d7	; &&& Check that VCnt is just 1 higher
+	cmp.b	#$ff,d7
+	beq.s	@noVCntVerify
+	addq.b	#1,d7
+	cmp.b	#kMaxVCnt+1,d7
+	bne.s	@noWrap
+	clr.b	d7
+	bra.s	@noVCntVerify	; $61 is a brief VCnt: sometimes we jump to 1
+@noWrap
+	cmp.b	d0,d7
+	bne.s	@badRead
+
+@noVCntVerify
+	move.b	d0,vHold(a5)
+
+	bsr	rxThreeBytes
+	bmi.s	@noData
+	tst.w	d6	; see if error
+	bne.s	@badRead
+
+	move.b	d0,d7	; hold a copy
+	and.b	#echoMask,d0	; mask off message
+	cmp.b	#echoByte,d0	; is it an echo?
+	beq.s	@gotAnEcho
+
+@badRead
+	or.w	#$0008,sr	; set N
+	rts
+
+@noData
+	move.b	vHold(a5),d0	; pass in previous VCnt
+	dbra	d5,@tryAgain	; if falls through, time out
+
+	cmpi.w	#-1,d5	; timeout?
+	beq.s	@badRead
+
+@gotAnEcho
+	sub.w	d5,d4	; get elasped VCnts
+	lsr.w	#1,d4	; convert round-trip to one-way
+	beq.s	@badRead	; if VCnt=0, error!
+	ext.l	d4
+	subq.w	#(kMaxVCnt-readVCnt)+2,d4	; compensate for readVCnt offset
+	divu	#kMaxVCnt+1,d4	; convert VCnts to frames and VCnts
+	addq.w	#1,d4	; ceiling latency
+	cmp.w	#maxLatency,d4	; see if latency too high
+	bge.s	@badRead	; (bge since need to increase latency by 1)
+
+	btst	#0,d7	; see if VCnt b6 set (stored in b0)
+	beq.s	@lowVCnt
+	add.b	#$40,d1	; add it in
+
+@lowVCnt
+	and.w	#$fff7,sr	; clear N
+	rts
+
+
+; syncOTron completion return to setup debugFlags as the same on both machines
+; uses d0.b
+
+setUpDebugflags
+	rts
+
+;==========================================================================
+; Fast interlace/non-interlace evaluation and activation
+; Input:
+;	d5.b = reference VCnt to seek to
+;	d2.b = timestamp of rx'd data
+; Output:
+;	d3.w = int/non-int mode we are in
+;	d2.b = absolute value of difference between VCnts
+; Uses d3
+
+SyncOTron
+	move.l	int_NonInt(a5),d3	; int in MSW, non-int in LSW
+	cmp.b	#illegalTimeStamp,d2	; see if time stamp valid
+	beq.s	@farStampM	; if not, stay non-interlaced
+	cmp.b	d5,d2	; see which is bigger
+	bgt.s	@noFlipM	; with bgt, = is non-int, with bge, = is int
+	swap	d3	; non-int in MSW, int in LSW
+	exg	d5,d2	; d2 is now bigger than d0
+@noFlipM
+	sub.b	d5,d2	; find difference
+	andi.l	#$000000FF,d2	; return just a byte
+	cmp.b	#$30,d2	; see if values are near or far apart
+	bge.s	@farStampM
+	swap	d3	; alternate int/non-int
+@farStampM
+	move.w	d3,$c00004	; set to appropriate display mode
+	rts
+
+
+
+; --------------------------------------------------------------------------
+; wait until slew completes
+; no registers affected
+
+waitForSlew
+	move.l	vSlewMode,VBLVector	; slew mode
+	move.w	#$2500,sr	; enable vbls
+
+@wait
+	tst.w	slewCount(a5)
+	bmi.s	@underFlow	; handle case where slewCount started as zero
+	bne.s	@wait	; if > 0, wait till slew is done
+
+@underFlow
+	move.w	#$2700,sr	; turn off interrupts
+	rts
+
+
+; --------------------------------------------------------------------------
+; waits until a message is received
+; returns N set if times out
+; else returns N clear.
+; input:	d4.lsw has mask to extract message, d4.msw has message to match
+; output:	d0 has 1st byte, d1 has 2nd byte, d2 is VCnt of received data, d3,d4 has masked message
+; uses d0,d1,d2,d3,d4,d5,d6,d7,a0,a4. Assumes a5 has been set up
+
+waitForMessage
+	move.w	#waitForMessageTimeOut,d5
+
+@tryAgain
+	bsr	waitTillNextVCnt	; check once a VCnt
+
+	bsr.s	rxThreeBytes
+	bmi.s	@noData
+	tst.w	d6	; see if error
+	bne.s	@badRead
+
+	move.b	d0,d3
+	and.b	d4,d3	; mask out non-message bits
+	swap	d4
+	cmp.b	d4,d3	; is it the message?
+	beq.s	@gotMessage	; N is clear
+	swap	d4	; restore d4
+@noData
+	dbra	d5,@tryAgain
+@badRead
+	or.w	#$0008,sr	; set N
+
+@gotMessage
+	rts
+
+
+
+; --------------------------------------------------------------------------
+; wait until syncLock is received from Master. Add deferral if necessary.
+; leaves (vertical) interrupts on
+; returns N set if error
+; no registers affected
+
+waitForSyncLock
+	move.w	#2*maxLatency,slewCount(a5)
+	move.l	vSyncLockMode,VBLVector
+	sf	latencyCount(a5)	; clear latencyCount flag
+	move.w	#$2500,sr	; enable vbls
+@tryAgain
+	tst.b	latencyCount(a5)
+	beq.s	@tryAgain
+	or.w	#$2700,sr	; disable vbls
+	rts
+
+
+
+;	****************
+;	RECEIVE routines
+;	****************
+
+; --------------------------------------------------------------------------
+
+shortTimedRxByte
+; tries $40 times to 3 bytes from rxFifo. N set if data not available.
+; Uses d0,d1,d2,d3,d4,d6,a0. Assumes a5 has been set up.
+
+	moveq	#$40,d4	; set to $40 to be conservative for now
+	moveq	#0,d6
+nextRx
+	tst.w	d6
+	bne.s	@bail
+	bsr.s	rxThreeBytes
+	dbpl	d4,nextRx
+
+@bail
+	rts
+
+
+; --------------------------------------------------------------------------
+; uses d0,d1,d2,d3,d6,d7,a0,a4. Assumes a5 has been set up.
+;
+; exit:	d0 = byte 1
+;	d1 = byte 2
+;	d2 = VCnt of received data
+
+rxThreeBytes
+	moveq	#0,d6
+	move.l	a1,-(sp)
+	; check modem RLSD && EQM
+	lea	kDefaultInternal,a4
+	move.b	#$52,kModem+$1c*2+1(a4)	; stuff XADD
+	move.b	#$81,kModem+$1d*2+1(a4)	; XCR1,XWT0,XACC1
+
+@rlsd
+	btst	#7,kModem+$F*2+1(a4)	; check RLSD
+	bne.s	@checkdata
+@noiseerror
+	move.w	#kLineNoiseErr,d6
+	bra.s	@returnData
+
+@checkdata
+	bsr.s	rxAsync	; always put bytes in rxPipe, cnt in d1, err in d6
+
+	tst.b	rxHoldOff(a5)	; still holding off rx for latency frames?
+	bne.s	@holdOffRead	; return holdOffByte & illegal time stamp
+
+	tst.w	d6	; error?
+	bne.s	@returnData	; bail, callers check d6
+
+	bsr	getNextThree	; get bytes from rxPipe in d0.b & d1.b, timestamp in d2.b, err if N set
+	bmi.s	@done	; bail with N set
+
+
+	move.b	d2,lastTimeStamp(a5)
+	clr.l	d3	; fake out getLatency for now
+	bra.s	@returnData
+
+@holdOffRead
+	clr.l	d6	; don't pass up any errors when we're in holdoff
+	move.b	#$ff,d0
+	move.b	holdOffByte(a5),d1	; set to noData in gameLoopError, zeroed in synco init
+	move.b	#illegalTimeStamp,d2
+	move.b	d2,lastTimeStamp(a5)
+
+@returnData
+	and.w	#$fff7,sr	; clear N
+
+@done
+	move.l (sp)+,a1
+	rts
+
+
+
+; --------------------------------------------------------------------------
+; Read a byte from the serial port if there is one to read.
+; N set if data not immediately available.
+; if there are several bytes in the rxFIFO, it reads them all and returns the last byte
+; in d0 and time stamp in d2 and lastTimeStamp. Clears d1.
+; d3 is non zero if rx framecount is different than current frameCount
+; uses d0,d1,d2,d3. Assumes a5 has been set up. d6,a0 saved/restored.
+
+rxOneByteAsync
+	movem.l	d6/a0,-(sp)
+	bsr.s	rxAsync	; this doesn't care about errs, it's only for flushing (???)
+	tst.b	d1	; d1 = rxPipeBytes
+	beq.s	@nothingReady
+	tst.w	d6
+	bne.s	@nothingReady
+
+	lsl.b	#4,d3	; put curr frameCount LSB in MSB
+	eor.b	d2,d3	; diff with rx frameCount
+	and.b	#$80,d3	; kill all but frameCount diff bit
+	and.b	#$7f,d2	; kill frameCount bit
+	move.b	d2,lastTimeStamp(a5)
+	clr.l	rxPipeHead(a5)	; flush rxpipe
+	clr.b	rxPipeBytes(a5)
+	clr.b	d1	; clear N and d1
+	bra.s	@rxOneByteEnd
+
+@nothingReady
+	clr.b	d3
+	or.w	#$0008,sr	; set N
+
+@rxOneByteEnd
+	movem.l	(sp)+,d6/a0
+	rts
+
+
+
+; --------------------------------------------------------------------------
+; reads everything it can and plops the bytes into the rxPipe, regardless of errors.
+;
+;	entry:	a5 -> vars
+;
+;	exit:	d0.b	last byte read
+;	d1.b	rxPipeBytes on entry
+;	d2.b	last timestamp w/framecount odd/even in bit 7
+;	d3.b	current framecount odd/even in bit 4
+;	d6.w	ERROR
+;
+;	trashes a0
+;
+
+rxAsync
+	clr.w	d6	; clear error flag
+	move.b	rxPipeBytes(a5),d1	; return # bytes in rxPipe in d1.b
+
+	btst	#kRMoverrunBit,kDefaultInternal+kReadMStatus1+1 ; see if overrun
+	beq.s	@noOverrun
+
+	move.w	#rxOverrunError,d6
+	move.l	myGameParams(pc),a0
+	addq.b	#1,GameParams.overrunErrors(a0)
+	rts	; bail
+
+@noOverrun
+
+@readAgain	; shouldn't get overrun in this loop
+	move.b	kDefaultInternal+kReadMStatus2+1,d3	; read status
+	btst	#kRMframeerrBit,d3	; see if framing Error
+	bne.s	@framingError
+
+	btst	#kRMrxreadyBit,d3	; byte ready?
+	beq.s	@rxNotReady	; nope
+
+	move.b	kDefaultInternal+kReadSerialVCnt+1,d2	; read vertical count
+	lsr.b	#1,d2	; reconcile with kReadMVSyncHigh
+	move.b	kDefaultInternal+kRxBuff+1,d0	; read data byte
+	lsl.b	#4,d3	; put frameCount LSB in MSB
+	and.b	#$80,d3	; kill all but MSB
+	or.b	d3,d2	; merge with vertical count (which <= $61)
+	bsr.s	putRxPipe	; store in raw data pipe
+	bra.s	@readAgain	; read until no more data
+
+@framingError
+	move.w	#framingError,d6
+	move.l	myGameParams(pc),a0
+	addq.b	#1,GameParams.frameErrors(a0)
+
+@rxNotReady
+	rts
+
+
+; --------------------------------------------------------------------------
+; add byte in d0, timestamp in d2 to rxPipe, return bytes in rxPipe in d1
+; uses a0. Assumes a5 has been set up.
+; leaves data in d0, timestamp in d2
+
+putRxPipe
+	moveq	#0,d6
+	lea	rxPipe(a5),a0
+	move.w	rxPipeTail(a5),d1
+	lsl.w	#8,d0
+	move.b	d2,d0
+	move.w	d0,0(a0,d1.w)
+	lsr.w	#8,d0	; restore d0...suboptimal hack till move to gametalk
+	addq.w	#2,d1
+	cmp.w	#rxPipeSize*2,d1	; see if wraps
+	bne.s	@noWrap
+	clr.w	d1
+@noWrap
+	cmp.w	rxPipeHead(a5),d1
+	bne.s	@noOverFlow
+@rxPipeOverFlow
+	move.w	#rxPipeOverFlowErr,d6
+	rts
+
+@noOverFlow
+	move.w	d1,rxPipeTail(a5)
+	move.b	rxPipeBytes(a5),d1
+	addq.b	#1,d1
+	move.b	d1,rxPipeBytes(a5)
+	rts
+
+
+; --------------------------------------------------------------------------
+; Pull 3 entries from the raw data/timestamp fifo (rxPipe).
+;
+; entry:	b4 of d3 = current framecount (odd/even)
+;	 d1 = number of bytes in rxPipe
+; 
+; exit:	 d0.b = remote p1
+;	 d1.b = remote p2
+;	 d6.l = error
+
+
+getNextThree
+	clr.l	d6	; assume no err
+	cmp.b	#3,d1	; see if at least 3 bytes in rxPipe
+	blt.s	@notThreeBytes
+
+	tst.b	straightData(a5)	; see if should be decoded
+	bne.s	@straightData
+
+@clearOutPipe
+	moveq	#0,d7
+
+	bsr	getRxPipe	; get byte 1
+	move.b	d1,d7
+
+	bsr	getRxPipe	; get byte 2
+	lsl.w	#8,d1
+	or.w	d1,d7
+
+	bsr	getRxPipe	; get byte 3
+	swap	d7
+	move.b	d1,d7
+	swap	d7	; d7.l = 0000 0000 dddd dddd dddd dddd dddd dddd 
+	; \___3___/ \___2___/ \___1___/
+	eori.l	#$005a5a5a,d7
+
+	move.l	d7,d5
+	lsl.l	#4,d5	; d5.l = 0000 dddd dddd dddd dddd dddd dddd 0000
+	swap	d5	; d5.l = dddd dddd dddd 0000 0000 dddd dddd dddd 
+	andi.w	#$0FFF,d7	; d7.l = 0000 0000 dddd dddd 0000 dddd dddd dddd 
+
+	cmp.w	d5,d7
+
+	beq.s	@okayChecksum
+
+	;	cmp.b	#holdOff,d1	; see if really a holdoff byte
+	;	beq.s	@okayChecksum
+
+	bra.s	@checkSumError
+
+@okayChecksum
+	move.b	d7,d1	; make d0.b & d1.b look like a controller
+	lsr.w	#4,d7
+	ori.b	#$0F,d7
+	move.b	d7,d0
+
+	lsl.b	#4,d3	; put curr frameCount LSB in MSB
+	eor.b	d2,d3	; diff with rx frameCount
+	and.b	#$7f,d2	; kill frameCount bit
+	move.b	d2,lastTimeStamp(a5)
+	and.b	#$80,d3	; kill all but frameCount diff bit
+@errorReturn
+	and.w	#$fff7,sr	; clear N
+	rts
+
+@notThreeBytes
+	or.w	#$0008,sr	; set N
+	rts
+
+
+@straightData
+	bsr.s	getRxPipe
+	move.b	d1,d0	; d0.w = ???? ???? CDcd efgh
+	and.w	#$3f,d0	; d0.w = ???? ???? 00cd efgh
+	move.w	d1,d7	; d7.w = 0000 0000 CDcd efgh
+	add.w	d7,d7	; d7.w = 0000 000C Dcde fgh0
+	add.w	d7,d7	; d7.w = 0000 00CD cdef gh00
+
+	bsr.s	getRxPipe
+	move.b	d1,d7	; d7.w = 0000 00CD EFcd efgh
+	and.b	#$3f,d1	; d1.w = 0000 0000 00cd efgh
+	cmp.b	d1,d0
+	bne.s	@checkSumError
+
+	add.w	d7,d7	; d7.w = 0000 0CDE Fcde fgh0
+	add.w	d7,d7	; d7.w = 0000 CDEF cdef gh00
+
+	bsr.s	getRxPipe
+	move.b	d1,d7	; d7.w = 0000 CDEF GHCD EFGH
+	add.w	d7,d7	; d7.w = 000C DEFG HCDE FGH0
+	add.w	d7,d7	; d7.w = 00CD EFGH CDEF GH00
+	move.w	d7,holdWord(a5)
+	and.b	#$3f,d1	; d1.w = ??00 CDEF 00CD EFGH
+	cmp.b	holdWord(a5),d1
+	beq.s	@decodeDone
+	; FUCK?
+@noDecode
+	cmp.b	#$3f,d0	; see if force checksum error
+	bne.s	@decodeDone	; must be both $3f in noDecode mode
+	cmp.b	#$3f,d1
+	bne.s	@decodeDone
+
+@checkSumError
+	move.w	#kGibbledPacket,d6	; d6 still swapped, but doesn't matter
+	move.l	myGameParams(pc),a0
+	addq.b	#1,GameParams.checksumErrors(a0)
+	bra.s	@gotThreeReturn
+
+@decodeDone
+	lsl.b	#4,d3	; put curr frameCount LSB in MSB
+	eor.b	d2,d3	; diff with rx frameCount
+	and.b	#$7f,d2	; kill frameCount bit
+	move.b	d2,lastTimeStamp(a5)
+	and.b	#$80,d3	; kill all but frameCount diff bit
+@gotThreeReturn
+	and.w	#$fff7,sr	; clear N
+	rts
+
+
+
+; --------------------------------------------------------------------------
+; remove oldest byte and return in d1. return timestamp in d2.
+; gets next byte in rxPipe and puts in d1, returns timestamp in d2
+; uses a0, assumes a5 has been setup
+
+getRxPipe
+	lea	rxPipe(a5),a0
+	move.w	rxPipeHead(a5),d2
+	move.w	0(a0,d2.w),d1	; get oldest entry
+	addq.w	#2,d2
+	cmp.w	#rxPipeSize*2,d2	; see if wraps
+	bne.s	@noWrap
+	clr.w	d2
+@noWrap
+	move.w	d2,rxPipeHead(a5)
+	move.b	rxPipeBytes(a5),d2
+	subq.b	#1,d2
+	move.b	d2,rxPipeBytes(a5)
+	move.b	d1,d2	; grab timestamp
+	lsr.w	#8,d1	; move down data
+	rts
+
+
+; --------------------------------------------------------------------------
+; adds word d0.b:d1.b to rxFifo
+; uses d2, a0. Assumes a5 has been set up.
+
+putRxFifo
+	moveq	#0,d6
+	lea	rxFifo(a5),a0
+	move.w	rxFifoTail(a5),d2
+
+	lsl.w	#8,d0
+	move.b	d1,d0
+
+	move.w	d0,0(a0,d2.w)
+	addq.w	#2,d2
+	cmp.w	#rxFifoSize*2,d2	; see if wraps
+	bne.s	@noWrap
+	clr.w	d2
+@noWrap
+	cmp.w	rxFifoHead(a5),d2
+	bne.s	@noOverFlow
+
+	move.w	#rxFifoOverFlowErr,d6
+	or.w	#$0008,sr	; set N
+	rts
+
+@noOverFlow
+	move.w	d2,rxFifoTail(a5)	; N should be clear
+@skipOverFlow
+	rts
+
+
+; gets next word in rxFifo and puts in d0. N bit set if rxFifo empty
+; uses d1, a0, assumes a5 has been setup
+
+getRxFifo
+	lea	rxFifo(a5),a0
+	move.w	rxFifoHead(a5),d1
+	cmp.w	rxFifoTail(a5),d1
+	bne.s	@notEmpty
+	or.w	#$0008,sr	; set N
+	bra.s	endGetRxFifo
+@notEmpty
+	move.w	0(a0,d1.w),d0	; get oldest entry
+	addq.w	#2,d1
+	cmp.w	#rxFifoSize*2,d1	; see if wraps
+	bne.s	@noWrap
+	clr.w	d1
+@noWrap
+	move.w	d1,rxFifoHead(a5)	; clears N as side-effect
+endGetRxFifo
+	rts
+
+
+
+; flush any chars in serial rx buffer
+; reset rx pipe
+; uses a0,d0-d3/d6. Expects a5 -> vars.
+
+flushSerial
+	move.w	sr,-(sp)
+	move.w	#$2700,sr
+
+	clr.l	rxPipeHead(a5)	; zeros both head and tail
+
+	bsr	rxOneByteASync	; keep reading serial until empty
+
+	clr.l	rxPipeHead(a5)	; zeros both head and tail
+	clr.b	rxPipeBytes(a5)
+
+	lea	rxPipe(a5),a0
+	move.w	#rxPipeSize-1,d0
+@nextPipeClr
+	move.w	#$1234,(a0)+	; fill it with something that fails the 'checksum'
+	dbra	d0,@nextPipeClr
+
+	move.w	(sp)+,sr
+	rts
+
+
+
+
+;	*****************
+;	TRANSMIT routines
+;	*****************
+
+; **	 **
+; *** Do not ignore the distinction between txNoHoldOff and txThreeBytes ***
+; **	 **
+
+
+; --------------------------------------------------------------------------
+; send word in d0
+;
+; entry:	d0.w = prepacked ctlr data to xmit
+;
+; exit:	err in d0 & d6
+;
+; uses:	d0-d3
+;
+
+txThreeBytes
+	moveq	#0,d1
+	; we pre-shifted the upper nybble down in tentReadController
+	; d0.l = ???? ???? ???? ???? 0000 dddd dddd dddd
+	move.w	d0,d1	; d1.l = 0000 0000 0000 0000 0000 dddd dddd dddd
+	swap	d1	; d1.l = 0000 dddd dddd dddd 0000 0000 0000 0000 
+	lsr.l	#4,d1	; d1.l = 0000 0000 dddd dddd dddd 0000 0000 0000
+	or.w	d0,d1	; d1.l = 0000 0000 dddd dddd dddd dddd dddd dddd 
+	; \___3___/ \___2___/ \___1___/
+	; tx three bytes
+
+	eori.l	#$005a5a5a,d1
+
+	move.b	d1,txData	; send byte 1
+	lsr.w	#8,d1
+	move.b	d1,txData	; send byte 2
+	swap	d1
+	move.b	d1,txData	; send byte 3
+
+	clr.l	d0	; return no error
+	clr.l	d6
+	rts
+
+
+; --------------------------------------------------------------------------
+; send d0.b & d1.b
+;
+; entry:	d0.b & d1.b = data to xmit
+;
+; exit:	err in d0 & d6
+;
+; uses:	d0-d3
+;
+; in the comments below, d0.b = 00cd efgh	<- note that the upper 2 bits MUST come in 00
+;	 d1.b = 00CD EFGH
+
+txNoHoldOff
+	move.b	d1,d2	; d2.w = ???? ???? 00CD EFGH
+
+	add.b	d2,d2	; d2.w = ???? ???0 0CDE FGH0
+	add.b	d2,d2	; d2.w = ???? ??00 CDEF GH00
+	move.b	d2,d3	; d3.w = ???? ???? CDEF GH00
+	and.b	#$c0,d3	; d3.w = ???? ???? CD00 0000
+
+	or.b	d3,d0	; d0.w = ???? ???? CDcd efgh
+	move.b	d0,txData	; xmit
+
+	and.b	#$3f,d0	; d0.w = ???? ???? 00cd efgh
+	add.b	d2,d2	; d2.w = ???? ?00C DEFG H000
+	add.b	d2,d2	; d2.w = ???? 00CD EFGH 0000
+	move.b	d2,d3	; d3.w = ???? ???? EFGH 0000
+	and.b	#$c0,d3	; d3.w = ???? ???? EF00 0000
+
+	or.b	d3,d0	; d0.w = ???? ???? EFcd efgh
+	move.b	d0,txData	; xmit
+
+	add.b	d2,d2	; d2.w = ???0 0CDE FGH0 0000
+	add.b	d2,d2	; d2.w = ??00 CDEF GH00 0000
+
+	or.b	d2,d1	; d1.w = ??00 CDEF GHCD EFGH
+	move.b	d1,txData	; xmit
+
+	clr.l	d0	; return no error
+	clr.l	d6
+	rts
+
+
+
+
+;	************************************
+;	Local Controller Read/Delay Routines
+;	************************************
+
+; --------------------------------------------------------------------------
+; tentatively read the controllers and hold the results for possible later use
+; uses d0,d1,d2,a0,a1,a2,a3, assumes a5 has been setup
+;
+; returns:	d0.w = crunched ctlr data to xmit
+
+tentReadControllers
+	moveq	#0,d1	; read ctlr 1
+	jsr	$613C	; call game's pad read
+
+	cmpi.w	#0,d0	; bogus read?
+	bne.s	@readOK
+	move.w	#$FFFF,d0	; fake it
+	tst.b	lastWas6Button(a5)
+	beq.s	@readOK
+	bset.l	#31,d0
+@readOK
+
+	tst.l	d0
+	bpl.s	@its3Button	; if +, it's a 3-button pad
+
+	andi.w	#$7FFF,d0	; d0.w = 0XYZ 1111 SACB RLDU
+	; hi bit clear == read 6 button ctlr
+	st	lastWas6Button(a5)
+	bra.s	@afterRead
+
+@its3Button
+	or.w	#$FF00,d0	; d0.w = 1111 1111 SACB RLDU
+	; hi bit set == read 3 button ctlr
+@afterRead
+	move.w d0,ctrl1TentStore(a5)	; store result
+
+	bsr.s	syncCtrlData
+
+readCtrlEnd	; do this for txThreeBytes
+	move.w	ctrl1TentStore(a5),d0	; pass back 1st half of local ctlr 1
+	lsr.w	#4,d0	; shift this fucker down for txThreeBytes
+	move.b	ctrl2TentStore(a5),d0	; pass back 2nd half of local ctlr 1
+	rts
+
+
+syncCtrlData
+	tst.b	isLeader(a5)
+	beq.s	isSlaveA
+	lea ctrl1Hold(a5),a0	; i am Master, so i am P1
+	lea ctrl3Hold(a5),a1	; he is Slave, so he is P2
+	bra.s	isMasterA
+isSlaveA
+	lea ctrl3Hold(a5),a0	; i am Slave, so i am P2
+	lea ctrl1Hold(a5),a1	; he is Master, so he is P1
+isMasterA
+	move.w	ctrl1TentStore(a5),d0	; get current read data for my 2 controllers
+
+	bsr.s	readDelay
+	move.w	d0,(a0)	; store delayed local controller data 
+
+	bsr	getRxFifo	; get remote controller data (oldest rxFifo entries)
+	bpl.s	realData
+	clr.w	d0
+realData
+	move.w	d0,(a1)	; store oldest rxFifo entry for other player
+
+	rts
+
+
+
+; puts d0.w into readDelayFifo. Returns d0.w from latencyCount frames previous. Uses d1,a3.
+
+readDelay
+	lea	readDelayFifo(a5),a3
+	move.w	readDelayPtr(a5),d1
+	move.w	d0,0(a3,d1.w)	; stash current read
+	move.b	latencyCount(a5),d0	; grab latency count (.b okay)
+	add.b	d0,d0	; asl.b #1,d0 for word pointer
+	sub.b	d0,d1	; point back into the past
+	bpl.s	@notNeg1
+	add.b	#readDelayFifoSize*2,d1	; wrap (.b okay)
+@notNeg1
+	move.w	0(a3,d1.w),d0	; snarf previous read
+
+	move.w	readDelayPtr(a5),d1	; grab Ptr again
+	addq.w	#2,d1	; point to next
+	cmp.w	#readDelayFifoSize*2,d1	; see if wraps
+	bne.s	@noWrap
+	clr.w	d1
+@noWrap
+	move.w	d1,readDelayPtr(a5)
+	rts
+
+
+
+
+; --------------------------------------------------------------------------
+; S I N G L E P L A Y E R
+
+
+PlaySingleVBL
+	addq.l	#1,gTicks
+
+	movem.l	a0-a1/a5/d0-d2,-(sp)
+
+	move.l	varptr,a5
+	move.l	singleGameTicks(a5),d0
+	cmp.l	gTicks,d0
+
+	bge.s	@stillWaiting	; have we timed out yet?
+
+	lea	doGameVBL,a0
+	move.l	a0,VBLVector	; no longer need to check
+
+	move.b	#0,kDefaultInternal+kLEDData	; LEDs off indicates not waiting for connect
+
+	bsr	MapSingleOSMemory	; let the OS know that timed out
+	move.w	#kNetRegisterTimeout,-(sp)
+	bra.s	@handleTimeout	; clean up, we're outta here
+
+@stillWaiting
+	move.l	singleShiftCount(a5),d0	; current count for this 1/8th of timeout wait
+	addq.l	#1,d0	; bump it
+	cmp.l	singleShiftTicks(a5),d0	; ticks needed for 1/8th of timeout wait
+	bne.s	@noShiftChange	; match?
+
+	move.l	#0,d0	; zero current count
+	add.l	#1,singleLEDShift(a5)	; shift LEDs down one more when displaying
+
+@noShiftChange
+	move.l	d0,singleShiftCount(a5)	; update current count
+	move.l	singleLEDShift(a5),d0	; grab shift amount
+	move.b	gTicks+3,d1	; grab low byte of system ticks
+	lsr.b	#1,d1	; /2 for a nice flash
+	lsl.b	d0,d1	; shift down by amount appropriate for wait
+	move.b	d1,kDefaultInternal+kLEDData	; light 'em up
+
+	btst	#3,$3bc19f	; check for a modem ring
+	beq.s	@cleanUpCheckVBL
+
+	bsr.s	MapSingleOSMemory
+
+	move.w	#kRingDetected,-(sp)
+@handleTimeout
+	bsr	ClearHitEnables	; turn off all patchpoints
+
+	OSHandleGameError
+	addq.l	#2,sp
+
+	bsr	RestoreHitEnables	; patchpoints back as they were
+
+	bsr	MapMemForGame	; map memory for the game
+
+@cleanUpCheckVBL
+	movem.l	(sp)+,a0-a1/a5/d0-d2
+
+	; fall into VBL
+
+doGameVBL
+	movem.l	a0-a6/d0-d7,-(sp)
+	moveq	#0,d1	; read ctlr 1
+	jsr	$613C
+	move.l	d0,gameController1
+	moveq	#1,d1	; read ctlr 2
+	jsr	$613C
+	move.l	d0,gameController2
+	addq.l	#1,$ffff8890	; bump vbl count
+	movem.l	(sp)+,a0-a6/d0-d7
+
+	jmp	gameVBLPostReadCtrls	; jump into game VBL after readcontrols
+
+
+
+
+MapSingleOSMemory
+	move.b	#kHereAssert,kKillHereSoft
+
+	lea	@hereReturn(pc),a0	; get a return address in the new world
+	sub.l	#ExceptionRAMBase,a0
+	move.l	a0,-(sp)
+	jmp	magicAddr	; should trigger card exit
+
+@hereReturn	; return here from transaddr
+	sub.l	#ExceptionRAMBase,(sp)	; fix up return address
+	rts
+
+
+
+AdjustOffsetsForOS:
+	clr.l	gRamOffset
+	move.l	#-ExceptionRAMBase,d3
+	bsr.s	MySetMemOffsets
+	rts
+
+
+
+MySetMemOffsets:
+	clr.l	-(a7)	; ROMOffset = 0
+	move.l	d3,-(a7)
+	move.l	gGameParams,a0
+	move.l	GameParams.commSession(a0),-(a7)
+
+; Err	OSGTSession_SetRamRomOffsets ( GTSession * session, long ramOffset, long romOffset )
+	OSGTSession_SetRamRomOffsets
+
+	add.w	#12,a7	; clean up
+
+	add.l	d3,VBLVector	; remap vertical vector
+	rts
+
+
+; --------------------------------------------------------------------------
+; Fast Vars
+
+warmBootFlag	ds.w	1
+
+mysession	ds.l	1	; points to our lametalk session
+varptr	ds.l	1	; points to our vars block
+myGameParams	ds.l	1	; gGameParams address (mapped high)
+
+enable_0_Stash	ds.b	1
+enable_1_Stash	ds.b	1
+
+GTVBLVector	ds.l	1	; LameTalk active VBL
+vRunMode	ds.l	1	; LameTalk not active VBLs
+vSlewMode	ds.l	1
+vSyncLockMode	ds.l	1
+vEstabSyncMode	ds.l	1
+
+PatchEnd
+	endwith
+	endproc
+	end
