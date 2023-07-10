@@ -6,11 +6,20 @@
 ;*****************************************************************
 
 ; This current version works, but our text status updates when syncing
-; or determining latency does not show for some reason. Also seems that
-; games de-sync from randomness eventually. Unsure why at this point.
-; Needs more investigation.
+; or determining latency does not show for some reason. It used to!
 
-; * we need proper 6 button detection and support
+; Also seems that games de-sync from random-ness eventually. More than
+; likely related to random number generator stuff and somehow getting out
+; of sync eventually. Need some sort of method for keeping in sync
+; both consoles via interlace/non interlace and possibly some packet data
+; ordering checks possibly.
+
+; Current packet format is such: [1 byte  Vcount value] [2 bytes of Controller data]
+
+; * we need proper 6 button detection and support. currently hard coded to 3 button
+; needs detection and setting in vblank possibly for hot-plugging 3/6 button controller
+; if possible
+
 
     ORG     $00000000
     INCBIN  "MK2.BIN"
