@@ -374,7 +374,7 @@ SETUP_VDP:
     
     tst.w   (a0)                        ; Discard any pending VDP command
     
-    move.w  #$8000|$04, (a0)     ; Set up VDP registers
+    move.w  #$8000|$04, (a0)            ; Set up VDP registers
     move.w  #$8100|$24, (a0)
     move.w  #$8C00|$81, (a0)
     move.w  #$8B00|$00, (a0)
@@ -453,6 +453,8 @@ LOAD_FONT:
 
     ;move.l  #$40000010, (a0)            ; Reset vscroll
     ;move.l  d0, (a1)
+
+    move.w  #$8100|$64,($C00004)        ; Turn on display
 
     rts
 
@@ -553,7 +555,7 @@ PRESS_START:        DC.B '    PRESS START TO CONNECT   ',0
 
 IP_TEMPLATE:        DC.B '000.000.000.000',0
 
-TEST_IP:            DC.B 'C192.168.001.002:5364',$0A
+TEST_IP:            DC.B 'C192.168.001.234:5364',$0A
 
 CURSOR:             dc.b '0',0
 DOT_CURSOR:         DC.B '.',0

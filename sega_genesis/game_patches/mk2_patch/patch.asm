@@ -2,24 +2,28 @@
 ;** Project    : Mortal Kombat II                               **
 ;** Platform   : Sega Genesis - Retro.Link                      **
 ;** Programmer : b1tsh1ft3r                                     **
-;** Version    : 0.9                                            **
+;** Version    : 1.0                                            **
 ;*****************************************************************
 
-; This current version works, but our text status updates when syncing
-; or determining latency does not show for some reason. It used to!
+; BUGS
+; ---------------------------------
+; * text status updates when syncing or determining latency does not 
+;   show for some reason. It used to!
+;
+; * Seems that games de-sync from random-ness eventually. More than
+;   likely related to random number generator stuff and somehow getting out
+;   of sync eventually.
 
-; Also seems that games de-sync from random-ness eventually. More than
-; likely related to random number generator stuff and somehow getting out
-; of sync eventually. Need some sort of method for keeping in sync
-; both consoles via interlace/non interlace and possibly some packet data
-; ordering checks possibly.
+; TO DO
+; ---------------------------------
+; * Proper 6 button detection and support. currently hard coded to 3 button
+;   needs detection and setting in vblank possibly for hot-plugging 3/6 button controller
+;   if possible
+;
+; Network code needs a re-write. Basically needs delay based input + lockstep
+; which is partially implemented and sort of works but eventually de-syncs.
 
 ; Current packet format is such: [1 byte  Vcount value] [2 bytes of Controller data]
-
-; * we need proper 6 button detection and support. currently hard coded to 3 button
-; needs detection and setting in vblank possibly for hot-plugging 3/6 button controller
-; if possible
-
 
     ORG     $00000000
     INCBIN  "MK2.BIN"
@@ -408,6 +412,11 @@ NORMAL_VBLANK:
 ;** INCLUDES                                                                  **
 ;*******************************************************************************
 
+    include  includes/establish.asm
+    EVEN
+    include  includes/latency.asm
+    EVEN
+    include  includes/sync.asm
     EVEN
     include  includes/networking.asm
     EVEN
