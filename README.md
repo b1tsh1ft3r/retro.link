@@ -1,6 +1,6 @@
 # Retro.Link
 
-Retro.Link is an Ethernet cartridge adapter for the sega genesis video game consoles. It facilitates the use of networking functions in homebrew and existing games, but only if the software has been programmed to 
+Retro.Link is an Ethernet cartridge adapter for the sega genesis video game console. It facilitates the use of networking functions in homebrew and existing games, but only if the software has been programmed to 
 interact with the hardware. 
 
 # What can this be used for?
