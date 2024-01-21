@@ -22,14 +22,12 @@ Detect_Adapter:
     cmp.b   #$10, UART_DVID  ; 0x10 = Present
     bne.s   @Not_Found
 @Init_UART:
-    move.b  #$83, UART_LCR
-    move.b  #$00, UART_DLM
-    move.b  #$01, UART_DLL
-    move.b  #$03, UART_LCR
-    move.b  #$00, UART_MCR
-    move.b  #$01, UART_FCR
-    move.b  #$07, UART_FCR   ;  flush send/receive fifos
-    move.b  #$00, UART_IER
+    move.b  #$83, UART_LCR   ; 8-N-1 (7th bit sets divisor latch registers for manipulation)
+    move.b  #$00, UART_DLM   ; 921600 baud rate
+    move.b  #$01, UART_DLL   ; 921600 baud rate
+    move.b  #$03, UART_LCR   ; Unset 7th bit so we now use data registers instead of divisor registers
+    move.b  #$08, UART_MCR   ; Tell xpico to block all incoming tcp connections on powerup (default state)
+    move.b  #$07, UART_FCR   ; Enable and reset fifo pointers & data counters
     move.b  #1,cart_present
     rts
 @Not_Found:
@@ -49,9 +47,9 @@ Deny_Connections:
     rts
 
 ; To make a connection to another device via TCP you will need to send a connection
-; command through the UART to the XPICO by writing an IP address and port "C70.13.153.10:5364\n".
+; command string through the UART to the XPICO by writing an IP address and port "C70.13.153.10:5364\n".
 ; You can also use DNS in place of the IP address as well "Cwebsite.com:80\n". All Retro.link 
-; cartidges use the port 5364 for incoming connections. 
+; cartidges use the port 5364 for incoming connections.
 
 Connect:
     lea     IP_ADDRESS,A0    ; Our string to send
@@ -88,5 +86,5 @@ Receive_Byte:
 	rts                      ; Return
 
 Flush_Fifos:
-    move.b  #$07, UART_FCR   ; Flush send/receive fifos
+    move.b  #$07, UART_FCR   ; reset/"flush" send/receive fifo buffer indexes
     rts                      ; Return

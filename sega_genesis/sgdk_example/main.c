@@ -22,9 +22,8 @@ int main()
     cursor_y = 1;
 
     VDP_drawText("Detecting adapter...[  ]", cursor_x, cursor_y); cursor_x+=21; 
-    NET_initialize(); // Detect cartridge and set boolean variable
-
-    if(cart_present)
+    
+    if(NET_initialize())
     {
         VDP_setTextPalette(2); // Green text
         VDP_drawText("Ok", cursor_x, cursor_y); cursor_x=0; cursor_y+=2;
@@ -58,7 +57,14 @@ int main()
     VDP_drawText("Rebooting adapter...", cursor_x ,cursor_y); cursor_y+=2;
     NET_resetAdapter();
 
-    NET_connect(cursor_x, cursor_y, "irc.efnet.org:6667"); cursor_x=0; cursor_y++;
+    if(NET_connect("irc.efnet.org:6667")) 
+    { 
+        VDP_drawText("Connected!", cursor_x, cursor_y); cursor_y++; 
+    } 
+    else 
+    { 
+        VDP_drawText("Host Unreachable...", cursor_x, cursor_y); cursor_y++;
+    }
 
     while(1) // Loop forever and print out any data we receive in the hardware receive fifo
     { 
@@ -66,7 +72,7 @@ int main()
         if(buttons & BUTTON_START && buttons_prev == 0x00) { NET_sendMessage("PONG\n"); }
         while(NET_RXReady()) // while data in hardware receive FIFO
         {   
-            u8 byte = NET_readByte(); // Retrieve byte from RX hardware Fifo directly
+            u8 byte = NET_readByte(); // Retrieve byte from receive hardware Fifo directly
             switch(byte)
             {
                 case 0x0A: // a line feed?
@@ -91,7 +97,4 @@ int main()
 //------------------------------------------------------------------
     return(0);
 }
-
-
-
 

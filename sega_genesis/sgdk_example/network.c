@@ -4,24 +4,27 @@
 //****************************************************************
 // Initialize Network Adapter
 //****************************************************************
-// Sets boolean value cart_present to TRUE/FALSE
-void NET_initialize()
+// Detects adapter and returns TRUE or FALSE boolean value
+bool NET_initialize()
 {
     UART_LCR = 0x80;                // Setup registers so we can read device ID from UART
     UART_DLM = 0x00;                // to detect presence of hardware
     UART_DLL = 0x00;                // ..
 
-    cart_present = (UART_DVID == 0x10);
-
-    if (cart_present) // Init UART to 921600 Baud 8-N-1 no flow control
+    if(UART_DVID == 0x10) // Init UART to 921600 Baud 8-N-1 no flow control
     {
-        UART_LCR = 0x83;
-        UART_DLM = 0x00;
-        UART_DLL = 0x01;
-        UART_LCR = 0x03;
-        UART_MCR = 0x00;
-        UART_FCR = 0x07;
-        UART_IER = 0x00;
+        UART_LCR = 0x83;    // 8-N-1
+        UART_DLM = 0x00;    // 921600 Baud
+        UART_DLL = 0x01;    // 921600 Baud
+        UART_LCR = 0x03;    //
+        UART_MCR = 0x08;    // Block all incoming connections
+        UART_FCR = 0x07;    // Enable & reset fifos and buffer indexes
+        for(int i=0; i<BUFFER_SIZE; i++) { receive_buffer[i] = 0xFF; } // Flush software buffer
+        return TRUE;
+    }
+    else
+    {
+        return FALSE;
     }
 }
 
@@ -30,11 +33,10 @@ void NET_initialize()
 //****************************************************************
 void NET_flushBuffers(void)
 {
-    int i;
     readIndex  = 0;         // reset read index for software receive buffer
     writeIndex = 0;         // reset write index for software receive buffer
     UART_FCR   = 0x07;      // Reset UART TX/RX hardware fifos
-    for(i=0; i<BUFFER_SIZE; i++) { receive_buffer[i] = 0xFF; } // Software buffer
+    for(int i=0; i<BUFFER_SIZE; i++) { receive_buffer[i] = 0xFF; } // Flush software buffer
     return;
 }
 
@@ -119,15 +121,24 @@ u8 NET_readByte(void)
 // Network Send Message                                         **
 //****************************************************************
 // Sends a string of ascii 
-void NET_sendMessage(char *str)
+void NET_sendMessage(char *str) 
 {
-  int i=0;
-  int length=0; 
-  length = strlen(str);
-  char data[128];
-  strncpy(data, str, length);
-  data[length] = '\0';
-  while (i<length) { NET_sendByte(data[i]); i++; }
+    int i=0;
+    while (str[i] != '\0') { NET_sendByte(str[i]); i++; }
+}
+
+//****************************************************************
+// Network Update                                               **
+//****************************************************************
+// Check for data in hardware receive buffer and store it into 
+// the software receive buffer. Designed to be called from Vblank 
+void NET_update(void)
+{
+    while(NET_RXReady())
+    { 
+        u8 byte = NET_readByte(); 
+        NET_writeBuffer(byte); 
+    }
 }
 
 //****************************************************************
@@ -193,23 +204,22 @@ void NET_resetAdapter(void)
 // Connect                                                      **
 //****************************************************************
 // Make an outbound TCP connection to supplied DNS/IP
-void NET_connect(int x, int y, char *str)
+bool NET_connect(char *str)
 {
-    NET_sendByte('C');
-    NET_sendMessage(str);
-    NET_sendByte(0x0A);
+    NET_sendByte('C');NET_sendMessage(str); NET_sendByte(0x0A);
 
     while(!NET_RXReady());
     u8 byte = NET_readByte();
     switch(byte)
     {
         case 'C': // Connected
-            VDP_drawText("Connected:", x, y); VDP_drawText(str, x+11, y);
-            break;
+            return TRUE;
         case 'N': // Host Unreachable
-            VDP_drawText("Error: Host unreachable", x, y);
             NET_flushBuffers();
-            break;
+            return FALSE;
+        default:
+            NET_flushBuffers();
+            return FALSE;
     }
 }
 
@@ -283,4 +293,3 @@ void NET_pingIP(int x, int y, int ping_count, char *ip)
     }
     NET_exitMonitorMode();
 }
-

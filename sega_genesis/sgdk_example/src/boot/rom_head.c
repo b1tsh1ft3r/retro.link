@@ -3,9 +3,9 @@
 __attribute__((externally_visible))
 const ROMHeader rom_header = {
     "SEGA GENESIS    ",
-    "(C)SGDK 2023    ",
-    "SGDK Networking Example                         ",
-    "SGDK Networking Example                         ",
+    "(C)SGDK 2024    ",
+    "Retro.Link Example                              ",
+    "Retro.Link Example                              ",
     "GM 00000000-00",
     0x000,
     "JD              ",
@@ -22,6 +22,6 @@ const ROMHeader rom_header = {
     0x00200000,
     0x0020FFFF,
     "            ",
-    "DEMONSTRATION PROGRAM                   ",
+    "Retro.Link Example                      ",
     "JUE             "
 };
