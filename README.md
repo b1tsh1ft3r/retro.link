@@ -36,5 +36,5 @@ We've provided some examples in C and assembly to assist developers in understan
 * Example program written in [C](https://github.com/b1tsh1ft3r/retro.link/tree/main/sega_genesis/sgdk_example) for [SGDK](https://github.com/Stephane-D/SGDK) and [68000 Assembly](https://github.com/b1tsh1ft3r/retro.link/tree/main/sega_genesis/asm_example).
 
 # Support
-For support or additional information check out our [Twitter](https://twitter.com/retrolink10) for updates.
+For support or additional information check out our [Twitter](https://twitter.com/retrolink10) for updates or [Discord](http://retro.link)
 
